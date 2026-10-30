@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # Broker de mensajería (RabbitMQ)
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"   # Puerto AMQP
+      - "15672:15672" # Interfaz Web
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  # Bases de Datos Aisladas (PostgreSQL)
+  db-usuarios:
+    image: postgres:15
+    container_name: db-usuarios
+    environment:
+      POSTGRES_DB: db_usuarios
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+
+  db-vuelos:
+    image: postgres:15
+    container_name: db-vuelos
+    environment:
+      POSTGRES_DB: db_vuelos
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+
+  db-inventario:
+    image: postgres:15
+    container_name: db-inventario
+    environment:
+      POSTGRES_DB: db_inventario
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+
+  db-reservas:
+    image: postgres:15
+    container_name: db-reservas
+    environment:
+      POSTGRES_DB: db_reservas
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5435:5432"
+
+  db-pagos:
+    image: postgres:15
+    container_name: db-pagos
+    environment:
+      POSTGRES_DB: db_pagos
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5436:5432"
+
+  db-notificaciones:
+    image: postgres:15
+    container_name: db-notificaciones
+    environment:
+      POSTGRES_DB: db_notificaciones
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5437:5432"
