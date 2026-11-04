@@ -1,0 +1,363 @@
+services:
+  # ============================================================
+  # INFRAESTRUCTURA COMPARTIDA
+  # ============================================================
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  postgres-vuelos:
+    image: postgres:15-alpine
+    container_name: postgres-vuelos
+    ports:
+      - "5431:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: db_vuelos
+    volumes:
+      - pg_vuelos:/var/lib/postgresql/data
+      - ./servicios/vuelos/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d db_vuelos"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  postgres-reservas:
+    image: postgres:15-alpine
+    container_name: postgres-reservas
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: db_reservas
+    volumes:
+      - pg_reservas:/var/lib/postgresql/data
+      - ./servicios/reservas/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d db_reservas"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  postgres-pagos:
+    image: postgres:15-alpine
+    container_name: postgres-pagos
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: db_pagos
+    volumes:
+      - pg_pagos:/var/lib/postgresql/data
+      - ./servicios/pagos/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d db_pagos"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  postgres-usuarios:
+    image: postgres:15-alpine
+    container_name: postgres-usuarios
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: db_usuarios
+    volumes:
+      - pg_usuarios:/var/lib/postgresql/data
+      - ./servicios/usuarios/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d db_usuarios"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  postgres-inventario:
+    image: postgres:15-alpine
+    container_name: postgres-inventario
+    ports:
+      - "5435:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: db_inventario
+    volumes:
+      - pg_inventario:/var/lib/postgresql/data
+      - ./servicios/inventario-asientos/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d db_inventario"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  postgres-notificaciones:
+    image: postgres:15-alpine
+    container_name: postgres-notificaciones
+    ports:
+      - "5436:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: db_notificaciones
+    volumes:
+      - pg_notificaciones:/var/lib/postgresql/data
+      - ./servicios/notificaciones/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d db_notificaciones"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ============================================================
+  # MICROSERVICIOS (perfil: services)
+  # ============================================================
+  servicio-vuelos:
+    build:
+      context: .
+      dockerfile: servicios/vuelos/Dockerfile
+    container_name: servicio-vuelos
+    profiles:
+      - services
+      - all
+    ports:
+      - "8081:8081"
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST:-localhost}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
+      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+    depends_on:
+      postgres-vuelos:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  servicio-reservas:
+    build:
+      context: .
+      dockerfile: servicios/reservas/Dockerfile
+    container_name: servicio-reservas
+    profiles:
+      - services
+      - all
+    ports:
+      - "8082:8082"
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST:-localhost}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
+      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+    depends_on:
+      postgres-reservas:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  servicio-pagos:
+    build:
+      context: .
+      dockerfile: servicios/pagos/Dockerfile
+    container_name: servicio-pagos
+    profiles:
+      - services
+      - all
+    ports:
+      - "8083:8083"
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST:-localhost}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
+      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+    depends_on:
+      postgres-pagos:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  servicio-usuarios:
+    build:
+      context: .
+      dockerfile: servicios/usuarios/Dockerfile
+    container_name: servicio-usuarios
+    profiles:
+      - services
+      - all
+    ports:
+      - "8084:8084"
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST:-localhost}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
+      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+    depends_on:
+      postgres-usuarios:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  servicio-inventario-asientos:
+    build:
+      context: .
+      dockerfile: servicios/inventario-asientos/Dockerfile
+    container_name: servicio-inventario-asientos
+    profiles:
+      - services
+      - all
+    ports:
+      - "8085:8085"
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST:-localhost}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
+      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+    depends_on:
+      postgres-inventario:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  servicio-notificaciones:
+    build:
+      context: .
+      dockerfile: servicios/notificaciones/Dockerfile
+    container_name: servicio-notificaciones
+    profiles:
+      - services
+      - all
+    ports:
+      - "8086:8086"
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST:-localhost}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
+      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+    depends_on:
+      postgres-notificaciones:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # ============================================================
+  # GATEWAY (perfil: gateway)
+  # ============================================================
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    container_name: api-gateway
+    profiles:
+      - gateway
+      - all
+    ports:
+      - "8080:8080"
+    environment:
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
+      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # ============================================================
+  # WEBSOCKET (perfil: ws)
+  # ============================================================
+  websocket-server:
+    build:
+      context: .
+      dockerfile: websocket-server/Dockerfile
+    container_name: websocket-server
+    profiles:
+      - ws
+      - all
+    ports:
+      - "8090:8090"
+    environment:
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
+      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # ============================================================
+  # FRONTEND (perfil: frontend)
+  # ============================================================
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: frontend
+    profiles:
+      - frontend
+      - all
+    ports:
+      - "3000:3000"
+    environment:
+      GATEWAY_HOST: ${GATEWAY_HOST:-localhost}
+      GATEWAY_PORT: ${GATEWAY_PORT:-8080}
+    depends_on:
+      gateway:
+        condition: service_started
+
+volumes:
+  rabbitmq_data:
+  pg_vuelos:
+  pg_reservas:
+  pg_pagos:
+  pg_usuarios:
+  pg_inventario:
+  pg_notificaciones:
