@@ -1,15 +1,41 @@
+server:
+  port: 8080
+
 spring:
   application:
     name: api-gateway
-  datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/db_gateway
-    username: ${POSTGRES_USER:postgres}
-    password: ${POSTGRES_PASSWORD:postgres}
-  rabbitmq:
-    host: ${RABBITMQ_HOST:localhost}
-    port: ${RABBITMQ_PORT:5672}
-    username: ${RABBITMQ_USER:guest}
-    password: ${RABBITMQ_PASS:guest}
+  cloud:
+    gateway:
+      routes:
+        - id: servicio-usuarios
+          uri: http://${USUARIOS_HOST:servicio-usuarios}:8084
+          predicates:
+            - Path=/api/usuarios/**
 
-server:
-  port: 8080
+        - id: servicio-vuelos
+          uri: http://${VUELOS_HOST:servicio-vuelos}:8081
+          predicates:
+            - Path=/api/vuelos/**
+
+        - id: servicio-reservas
+          uri: http://${RESERVAS_HOST:servicio-reservas}:8082
+          predicates:
+            - Path=/api/reservas/**
+
+        - id: servicio-pagos
+          uri: http://${PAGOS_HOST:servicio-pagos}:8083
+          predicates:
+            - Path=/api/pagos/**
+
+        - id: servicio-inventario-asientos
+          uri: http://${INVENTARIO_HOST:servicio-inventario-asientos}:8085
+          predicates:
+            - Path=/api/inventario/**
+
+        - id: servicio-notificaciones
+          uri: http://${NOTIFICACIONES_HOST:servicio-notificaciones}:8086
+          predicates:
+            - Path=/api/notificaciones/**
+
+jwt:
+  secret: c3VwZXItc2VjcmV0LWtleS1wYXJhLWVsLXByb3llY3RvLWFicC11MS1kaXN0cmlidWlkb3M=
