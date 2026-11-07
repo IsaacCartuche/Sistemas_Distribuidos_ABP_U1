@@ -11,7 +11,7 @@ import java.util.UUID;
 
 @RestController
 @Validated
-@RequestMapping("/api/v1/inventario")
+@RequestMapping({"/api/v1/inventario", "/api/inventario"})
 public class InventarioController {
     private final InventarioService service;
     public InventarioController(InventarioService service) { this.service = service; }

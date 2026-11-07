@@ -98,7 +98,15 @@ de consultar. Por ello un asiento puede mostrar `BLOQUEADO` y `disponible: true`
 
 ## Endpoints
 
-Base: `http://localhost:8085/api/v1/inventario`.
+Bases equivalentes:
+
+- Versionada: `http://localhost:8085/api/v1/inventario`.
+- Compatible con la ruta del Gateway: `http://localhost:8085/api/inventario`.
+
+Todas las subrutas de la tabla siguiente funcionan con ambas bases mediante el mismo controlador,
+sin redirecciones. Por ejemplo, `GET /api/inventario/vuelos/1/asientos?disponibles=true` equivale a
+`GET /api/v1/inventario/vuelos/1/asientos?disponibles=true`. Las rutas versionadas se conservan;
+ambas variantes aplican las mismas reglas de tokens, idempotencia, concurrencia y TTL.
 
 | Método | Ruta | Uso |
 |--------|------|-----|
@@ -189,6 +197,8 @@ Cobertura:
 
 - Unitarias: reglas de propiedad, TTL en límite exacto, transiciones, duplicados y tokens terminales.
 - MockMvc: DTOs, IDs/UUID, rutas y respuestas 400/404/409.
+  Ambas bases se comprueban para inicializar, listar, filtrar disponibles, consultar, bloquear,
+  confirmar y liberar; también se verifican errores representativos 400/404/409 en las dos variantes.
 - PostgreSQL/HTTP real: inicialización idempotente/concurrente, confirmación y liberación,
   expiración con reloj controlable (sin esperas por TTL), disponibilidad sin scheduler,
   reintentos, tokens cruzados y reserva confirmada protegida.

@@ -67,7 +67,15 @@ de Compose y la ejecución de `JAVA_OPTS` siguen pendientes de la fase de despli
 
 ## API REST
 
-Base: `http://localhost:8081/api/v1/vuelos`.
+Bases equivalentes:
+
+- Versionada: `http://localhost:8081/api/v1/vuelos`.
+- Compatible con la ruta del Gateway: `http://localhost:8081/api/vuelos`.
+
+Ambas bases admiten todos los endpoints y filtros de la tabla siguiente mediante el mismo
+controlador, sin redirecciones. Por ejemplo, `GET /api/vuelos/1` equivale a
+`GET /api/v1/vuelos/1`. Las rutas versionadas se conservan. Al crear un vuelo, la cabecera
+`Location` conserva la variante utilizada en la solicitud (`/api/vuelos/{id}` o `/api/v1/vuelos/{id}`).
 
 | Método | Ruta | Resultado |
 |--------|------|-----------|
@@ -164,6 +172,8 @@ mvn test
   consultas y filtros, actualización, conservación de identidad y recursos inexistentes.
 - `VueloControllerTest`: contrato HTTP con MockMvc, `Location`, DTOs, validaciones,
   filtros y fechas, errores 400/404/409 y rechazo de JSON inválido.
+  Verifica ambas bases para crear, consultar, listar, buscar y actualizar, además de errores
+  representativos 400/404/409 y la cabecera `Location` correspondiente a cada variante.
 
 Las dos clases anteriores usan mocks: no abren conexiones PostgreSQL/RabbitMQ ni modifican bases de datos.
 Las pruebas PostgreSQL son optativas y se omiten si `VUELOS_POSTGRES_INTEGRATION` no vale `true`.

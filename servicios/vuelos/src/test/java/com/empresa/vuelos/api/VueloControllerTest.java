@@ -52,13 +52,14 @@ class VueloControllerTest {
     @MockBean
     private VueloService service;
 
-    @Test
-    void crearDevuelve201LocationYRepresentacion() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/vuelos", "/api/vuelos"})
+    void crearDevuelve201LocationYRepresentacion(String base) throws Exception {
         when(service.crear(any())).thenReturn(response());
 
-        mvc.perform(post(URL).contentType(MediaType.APPLICATION_JSON).content(jsonValido()))
+        mvc.perform(post(base).contentType(MediaType.APPLICATION_JSON).content(jsonValido()))
                 .andExpect(status().isCreated())
-                .andExpect(header().string("Location", "http://localhost" + URL + "/1"))
+                .andExpect(header().string("Location", "http://localhost" + base + "/1"))
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.precio").value(125.50))
                 .andExpect(jsonPath("$.fechaSalida").value("2027-05-10"))
@@ -66,49 +67,54 @@ class VueloControllerTest {
         verify(service).crear(any(VueloRequest.class));
     }
 
-    @Test
-    void consultarDevuelve200() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/vuelos", "/api/vuelos"})
+    void consultarDevuelve200(String base) throws Exception {
         when(service.consultar(1)).thenReturn(response());
 
-        mvc.perform(get(URL + "/1"))
+        mvc.perform(get(base + "/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.origen").value("Quito"));
     }
 
-    @Test
-    void listarSinFiltrosDevuelveArray() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/vuelos", "/api/vuelos"})
+    void listarSinFiltrosDevuelveArray(String base) throws Exception {
         when(service.listar(null, null, null)).thenReturn(List.of(response()));
 
-        mvc.perform(get(URL))
+        mvc.perform(get(base))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1));
     }
 
-    @Test
-    void buscarConvierteFechaYDelegaFiltros() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/vuelos", "/api/vuelos"})
+    void buscarConvierteFechaYDelegaFiltros(String base) throws Exception {
         when(service.listar("Quito", "Loja", LocalDate.of(2027, 5, 10))).thenReturn(List.of());
 
-        mvc.perform(get(URL).param("origen", "Quito").param("destino", "Loja").param("fecha", "2027-05-10"))
+        mvc.perform(get(base).param("origen", "Quito").param("destino", "Loja").param("fecha", "2027-05-10"))
                 .andExpect(status().isOk())
                 .andExpect(content().json("[]"));
         verify(service).listar("Quito", "Loja", LocalDate.of(2027, 5, 10));
     }
 
-    @Test
-    void actualizarDevuelve200() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/vuelos", "/api/vuelos"})
+    void actualizarDevuelve200(String base) throws Exception {
         when(service.actualizar(eq(1), any())).thenReturn(response());
 
-        mvc.perform(put(URL + "/1").contentType(MediaType.APPLICATION_JSON).content(jsonValido()))
+        mvc.perform(put(base + "/1").contentType(MediaType.APPLICATION_JSON).content(jsonValido()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1));
         verify(service).actualizar(eq(1), any(VueloRequest.class));
     }
 
-    @Test
-    void consultarInexistenteDevuelve404() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/vuelos", "/api/vuelos"})
+    void consultarInexistenteDevuelve404(String base) throws Exception {
         when(service.consultar(99)).thenThrow(new VueloNoEncontradoException(99));
 
-        mvc.perform(get(URL + "/99"))
+        mvc.perform(get(base + "/99"))
                 .andExpect(status().isNotFound())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.status").value(404))
@@ -165,9 +171,10 @@ class VueloControllerTest {
         verifyNoInteractions(service);
     }
 
-    @Test
-    void actualizarTambienValidaElCuerpo() throws Exception {
-        mvc.perform(put(URL + "/1").contentType(MediaType.APPLICATION_JSON).content("{}"))
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/vuelos", "/api/vuelos"})
+    void actualizarTambienValidaElCuerpo(String base) throws Exception {
+        mvc.perform(put(base + "/1").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errores.precio").exists());
         verifyNoInteractions(service);
@@ -182,11 +189,12 @@ class VueloControllerTest {
                 .andExpect(jsonPath("$.detail").value("El origen y el destino deben ser distintos"));
     }
 
-    @Test
-    void conflictoDePersistenciaNoExponeSql() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/vuelos", "/api/vuelos"})
+    void conflictoDePersistenciaNoExponeSql(String base) throws Exception {
         when(service.crear(any())).thenThrow(new DataIntegrityViolationException("detalle SQL privado"));
 
-        mvc.perform(post(URL).contentType(MediaType.APPLICATION_JSON).content(jsonValido()))
+        mvc.perform(post(base).contentType(MediaType.APPLICATION_JSON).content(jsonValido()))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.detail").value(
                         "Los datos del vuelo entran en conflicto con las restricciones de persistencia"));

@@ -23,7 +23,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/v1/vuelos")
+@RequestMapping({"/api/v1/vuelos", "/api/vuelos"})
 @Validated
 public class VueloController {
 
