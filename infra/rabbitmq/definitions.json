@@ -1,17 +1,22 @@
 {
   "exchanges": [
-    { "name": "vuelos.events", "type": "topic", "durable": true }
+    { "name": "vuelos.events", "type": "topic", "durable": true },
+    { "name": "vuelos.dlx", "type": "topic", "durable": true }
   ],
   "queues": [
-    { "name": "reservas.alta", "durable": true, "arguments": { "x-max-priority": 10 }},
-    { "name": "pagos.media", "durable": true, "arguments": { "x-max-priority": 5 }},
-    { "name": "notificaciones.entrada", "durable": true, "arguments": { "x-max-priority": 5 }},
-    { "name": "notificaciones.baja", "durable": true, "arguments": { "x-max-priority": 1 }},
+    { "name": "inventario.entrada", "durable": true, "arguments": { "x-max-priority": 5, "x-dead-letter-exchange": "vuelos.dlx", "x-dead-letter-routing-key": "inventario.dlq" }},
+    { "name": "reservas.alta", "durable": true, "arguments": { "x-max-priority": 10, "x-dead-letter-exchange": "vuelos.dlx", "x-dead-letter-routing-key": "reserva.alta.dlq" }},
+    { "name": "pagos.media", "durable": true, "arguments": { "x-max-priority": 5, "x-dead-letter-exchange": "vuelos.dlx", "x-dead-letter-routing-key": "pago.media.dlq" }},
+    { "name": "notificaciones.entrada", "durable": true, "arguments": { "x-max-priority": 5, "x-dead-letter-exchange": "vuelos.dlx", "x-dead-letter-routing-key": "notificacion.entrada.dlq" }},
+    { "name": "notificaciones.baja", "durable": true, "arguments": { "x-max-priority": 1, "x-dead-letter-exchange": "vuelos.dlx", "x-dead-letter-routing-key": "notificacion.baja.dlq" }},
     { "name": "dlq.reservas", "durable": true }
   ],
   "bindings": [
-    { "source": "vuelos.events", "destination": "reservas.alta", "routing_key": "reserva.alta" },
-    { "source": "vuelos.events", "destination": "pagos.media", "routing_key": "pago.media" },
+    { "source": "vuelos.events", "destination": "inventario.entrada", "routing_key": "reserva.creada" },
+    { "source": "vuelos.events", "destination": "inventario.entrada", "routing_key": "reserva.cancelada" },
+    { "source": "vuelos.events", "destination": "reservas.alta", "routing_key": "asiento.expirado" },
+    { "source": "vuelos.events", "destination": "pagos.media", "routing_key": "pago.exitoso" },
+    { "source": "vuelos.events", "destination": "pagos.media", "routing_key": "pago.fallido" },
     { "source": "vuelos.events", "destination": "notificaciones.entrada", "routing_key": "reserva.creada" },
     { "source": "vuelos.events", "destination": "notificaciones.entrada", "routing_key": "reserva.cancelada" },
     { "source": "vuelos.events", "destination": "notificaciones.entrada", "routing_key": "reserva.confirmada" },
@@ -19,6 +24,6 @@
     { "source": "vuelos.events", "destination": "notificaciones.entrada", "routing_key": "pago.fallido" },
     { "source": "vuelos.events", "destination": "notificaciones.entrada", "routing_key": "pago.reembolsado" },
     { "source": "vuelos.events", "destination": "notificaciones.baja", "routing_key": "notificacion.baja" },
-    { "source": "vuelos.events", "destination": "dlq.reservas", "routing_key": "reserva.dlq" }
+    { "source": "vuelos.events", "destination": "dlq.reservas", "routing_key": "*.dlq" }
   ]
 }
