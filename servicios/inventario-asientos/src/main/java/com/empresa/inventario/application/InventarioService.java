@@ -4,6 +4,7 @@ import com.empresa.inventario.api.InventarioDto.*;
 import com.empresa.inventario.config.InventarioConfig.Propiedades;
 import com.empresa.inventario.domain.*;
 import com.empresa.inventario.persistence.*;
+import com.empresa.inventario.outbox.ExpiracionOutbox;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.*;
@@ -17,13 +18,15 @@ public class InventarioService {
     private final RetencionRepository retenciones;
     private final Clock reloj;
     private final Propiedades propiedades;
+    private final ExpiracionOutbox outbox;
 
     public InventarioService(AsientoRepository asientos, RetencionRepository retenciones,
-                             Clock reloj, Propiedades propiedades) {
+                             Clock reloj, Propiedades propiedades, ExpiracionOutbox outbox) {
         this.asientos = asientos;
         this.retenciones = retenciones;
         this.reloj = reloj;
         this.propiedades = propiedades;
+        this.outbox = outbox;
     }
 
     public LocalDateTime ahora() {
@@ -93,8 +96,12 @@ public class InventarioService {
         }
         if (r.getEstado() == EstadoRetencion.CONFIRMADA) throw conflicto("Un asiento reservado no se libera por este endpoint");
         verificarActual(asiento, r);
-        r.terminar(asiento.expirado(ahora()) ? EstadoRetencion.EXPIRADA : EstadoRetencion.LIBERADA);
-        asiento.liberar();
+        if (asiento.expirado(ahora())) {
+            expirarActual(asiento);
+        } else {
+            r.terminar(EstadoRetencion.LIBERADA);
+            asiento.liberar();
+        }
         asientos.flush();
         return RetencionResponse.from(r);
     }
@@ -113,6 +120,7 @@ public class InventarioService {
         Retencion r = retencion(asiento.getId(), asiento.getBloqueoToken());
         verificarActual(asiento, r);
         r.terminar(EstadoRetencion.EXPIRADA);
+        outbox.registrar(asiento, r);
         asiento.liberar();
     }
     private Asiento obtener(Integer id) {

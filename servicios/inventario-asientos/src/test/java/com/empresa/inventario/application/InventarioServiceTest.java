@@ -4,6 +4,7 @@ import com.empresa.inventario.api.InventarioDto.*;
 import com.empresa.inventario.config.InventarioConfig.Propiedades;
 import com.empresa.inventario.domain.*;
 import com.empresa.inventario.persistence.*;
+import com.empresa.inventario.outbox.ExpiracionOutbox;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -18,6 +19,7 @@ import static org.mockito.ArgumentMatchers.any;
 class InventarioServiceTest {
     private final AsientoRepository asientos = mock(AsientoRepository.class);
     private final RetencionRepository retenciones = mock(RetencionRepository.class);
+    private final ExpiracionOutbox outbox = mock(ExpiracionOutbox.class);
     private final Clock reloj = Clock.fixed(Instant.parse("2027-01-01T12:00:00Z"), ZoneOffset.UTC);
     private final UUID token = UUID.randomUUID();
     private InventarioService service;
@@ -26,7 +28,7 @@ class InventarioServiceTest {
 
     @BeforeEach
     void preparar() {
-        service = new InventarioService(asientos, retenciones, reloj, new Propiedades(60, 1000));
+        service = new InventarioService(asientos, retenciones, reloj, new Propiedades(60, 1000), outbox);
         asiento = new Asiento(1, "1A");
         ReflectionTestUtils.setField(asiento, "id", 1);
         retencion = new Retencion(token, 1, service.ahora().plusSeconds(60));
@@ -63,6 +65,7 @@ class InventarioServiceTest {
         bloquearExistente();
         assertThat(service.confirmar(1, token).estado()).isEqualTo(EstadoRetencion.CONFIRMADA);
         assertThat(asiento.getEstado()).isEqualTo(EstadoAsiento.RESERVADO);
+        verifyNoInteractions(outbox);
         assertThat(asiento.getBloqueadoHasta()).isNull();
         assertThat(asiento.getBloqueoToken()).isEqualTo(token);
     }
@@ -116,6 +119,7 @@ class InventarioServiceTest {
         retencion = new Retencion(token, 1, service.ahora().minusSeconds(1));
         bloquearExistente();
         assertThat(service.liberar(1, token).estado()).isEqualTo(EstadoRetencion.EXPIRADA);
+        verify(outbox).registrar(asiento, retencion);
     }
     @Test
     void liberarConfirmadoNoCancelaReserva() {
@@ -163,6 +167,7 @@ class InventarioServiceTest {
         assertThat(retencion.getEstado()).isEqualTo(EstadoRetencion.EXPIRADA);
         assertThat(asiento.getEstado()).isEqualTo(EstadoAsiento.DISPONIBLE);
         verify(asientos, times(1)).flush();
+        verify(outbox, times(1)).registrar(asiento, retencion);
     }
     @Test
     void inicializarNormalizaDeduplicaYOrdena() {

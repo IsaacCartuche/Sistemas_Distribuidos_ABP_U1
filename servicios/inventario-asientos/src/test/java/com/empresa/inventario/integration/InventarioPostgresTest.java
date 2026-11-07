@@ -4,6 +4,7 @@ import com.empresa.inventario.api.InventarioDto.*;
 import com.empresa.inventario.application.*;
 import com.empresa.inventario.domain.*;
 import com.empresa.inventario.persistence.*;
+import com.empresa.inventario.outbox.ExpiracionOutbox;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -28,7 +29,7 @@ import static org.assertj.core.api.Assertions.*;
 
 @EnabledIfEnvironmentVariable(named = "INVENTARIO_POSTGRES_INTEGRATION", matches = "true")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"inventario.expiracion-habilitada=false", "inventario.ttl-segundos=60"})
+        properties = {"inventario.expiracion-habilitada=false", "inventario.ttl-segundos=60", "inventario.outbox.habilitada=false"})
 @Import(InventarioPostgresTest.RelojConfig.class)
 class InventarioPostgresTest {
     private static final String BASE = "/api/v1/inventario";
@@ -40,6 +41,7 @@ class InventarioPostgresTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager tm;
     @Autowired RelojPrueba reloj;
+    @Autowired ExpiracionOutbox expiracionOutbox;
     private int vuelo;
 
     @DynamicPropertySource
@@ -149,6 +151,7 @@ class InventarioPostgresTest {
         assertThat(http.exchange(url, HttpMethod.DELETE, HttpEntity.EMPTY, String.class).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(bloquearHttp(id, UUID.randomUUID()).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(service.listar(vuelo, true)).isEmpty();
+        assertThat(eventos(token)).isZero();
     }
 
     @Test
@@ -164,6 +167,10 @@ class InventarioPostgresTest {
         new ExpiracionProgramada(asientos, service).ejecutar();
         assertThat(service.consultar(id).estado()).isEqualTo(EstadoAsiento.DISPONIBLE);
         assertThat(retenciones.findById(token).orElseThrow().getEstado()).isEqualTo(EstadoRetencion.EXPIRADA);
+        assertThat(eventos(token)).isEqualTo(1);
+        service.expirarUno(id);
+        service.liberar(id, token);
+        assertThat(eventos(token)).isEqualTo(1);
     }
 
     @Test
@@ -195,6 +202,7 @@ class InventarioPostgresTest {
         assertThat(asientos.findById(id).orElseThrow().getBloqueoToken()).isEqualTo(nuevo);
         assertThat(retenciones.findById(viejo).orElseThrow().getEstado()).isEqualTo(EstadoRetencion.EXPIRADA);
         assertThat(bloquearHttp(id, viejo).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(eventos(viejo)).isEqualTo(1);
     }
 
     @Test
@@ -281,7 +289,10 @@ class InventarioPostgresTest {
                         leido.countDown();
                         esperar(continuar);
                         if (confirmar) { a.confirmar(); r.terminar(EstadoRetencion.CONFIRMADA); }
-                        else { a.liberar(); r.terminar(EstadoRetencion.EXPIRADA); }
+                        else {
+                            expiracionOutbox.registrar(a, r);
+                            a.liberar(); r.terminar(EstadoRetencion.EXPIRADA);
+                        }
                         asientos.flush();
                     });
                     return false;
@@ -299,6 +310,61 @@ class InventarioPostgresTest {
     }
 
     private int nuevo() { return service.inicializar(vuelo, new InicializarRequest(List.of("1A"))).get(0).id(); }
+    private int eventos(UUID token) {
+        return jdbc.queryForObject("select count(*) from inventario_outbox where token = ?", Integer.class, token);
+    }
+
+    @Test
+    void rollbackRevierteExpiracionYOutboxConjuntamente() {
+        int id = nuevo();
+        UUID token = UUID.randomUUID();
+        service.bloquear(id, token);
+        reloj.avanzar(60);
+        new TransactionTemplate(tm).executeWithoutResult(status -> {
+            service.expirarUno(id);
+            assertThat(eventos(token)).isEqualTo(1);
+            status.setRollbackOnly();
+        });
+        assertThat(service.consultar(id).estado()).isEqualTo(EstadoAsiento.BLOQUEADO);
+        assertThat(retenciones.findById(token).orElseThrow().getEstado()).isEqualTo(EstadoRetencion.ACTIVA);
+        assertThat(eventos(token)).isZero();
+        service.expirarUno(id);
+        assertThat(eventos(token)).isEqualTo(1);
+    }
+
+    @Test
+    void expiracionConcurrenteSoloCreaUnEvento() throws Exception {
+        int id = nuevo();
+        UUID token = UUID.randomUUID();
+        service.bloquear(id, token);
+        reloj.avanzar(60);
+        paralelos(4, i -> {
+            try { service.expirarUno(id); }
+            catch (OptimisticLockingFailureException exception) { /* Otra transacción ganó. */ }
+            return true;
+        });
+        assertThat(eventos(token)).isEqualTo(1);
+        assertThat(service.consultar(id).estado()).isEqualTo(EstadoAsiento.DISPONIBLE);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void expirarSimultaneamenteConConfirmarOLiberarNoDuplica(boolean confirmar) throws Exception {
+        int id = nuevo();
+        UUID token = UUID.randomUUID();
+        service.bloquear(id, token);
+        reloj.avanzar(60);
+        paralelos(2, i -> {
+            try {
+                if (i == 0) service.expirarUno(id);
+                else if (confirmar) service.confirmar(id, token);
+                else service.liberar(id, token);
+            } catch (OptimisticLockingFailureException | InventarioException exception) { /* Conflicto esperado. */ }
+            return true;
+        });
+        assertThat(service.consultar(id).estado()).isEqualTo(EstadoAsiento.DISPONIBLE);
+        assertThat(eventos(token)).isEqualTo(1);
+    }
     private String bloqueoUrl(int id, UUID token) { return BASE + "/asientos/" + id + "/bloqueos/" + token; }
     private ResponseEntity<String> bloquearHttp(int id, UUID token) {
         return http.exchange(bloqueoUrl(id, token), HttpMethod.PUT, HttpEntity.EMPTY, String.class);
