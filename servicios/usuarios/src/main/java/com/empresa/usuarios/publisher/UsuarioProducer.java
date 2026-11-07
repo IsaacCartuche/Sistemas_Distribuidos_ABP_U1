@@ -1,13 +1,13 @@
 package com.empresa.usuarios.publisher;
 
+import com.empresa.usuarios.dto.EventoUsuarioRegistrado;
+import com.empresa.usuarios.model.Usuario;
 import lombok.RequiredArgsConstructor;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.UUID;
 
 @Component
@@ -22,17 +22,20 @@ public class UsuarioProducer {
     @Value("${app.rabbitmq.routing-key}")
     private String routingKey;
 
-    public void publicarUsuarioRegistrado(Long id, String email, String rol) {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("userId", id);
-        payload.put("email", email);
-        payload.put("rol", rol);
+    public void publicarUsuarioRegistrado(Usuario usuario) {
+        EventoUsuarioRegistrado evento = EventoUsuarioRegistrado.builder()
+                .eventId(UUID.randomUUID().toString())
+                .correlationId(usuario.getId().toString())
+                .timestamp(Instant.now().toString())
+                .payload(EventoUsuarioRegistrado.Payload.builder()
+                        .id(usuario.getId())
+                        .email(usuario.getEmail())
+                        .nombre(usuario.getNombre())
+                        .apellido(usuario.getApellido())
+                        .rol(usuario.getRol().name())
+                        .build())
+                .build();
 
-        Map<String, Object> event = new HashMap<>();
-        event.put("eventId", UUID.randomUUID().toString());
-        event.put("timestamp", Instant.now().toString());
-        event.put("payload", payload);
-
-        rabbitTemplate.convertAndSend(exchange, routingKey, event);
+        rabbitTemplate.convertAndSend(exchange, routingKey, evento);
     }
 }

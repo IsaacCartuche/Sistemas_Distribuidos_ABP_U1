@@ -37,9 +37,11 @@ public class AuthController {
                 .rol(rolAsignado)
                 .build();
 
-        usuarioRepository.save(usuario);
+        // 1. Guardar en base de datos
+        Usuario usuarioGuardado = usuarioRepository.save(usuario);
 
-        usuarioProducer.publicarUsuarioRegistrado(usuario.getId(), usuario.getEmail(), usuario.getRol().name());
+        // 2. Publicar evento en RabbitMQ pasando la entidad completa
+        usuarioProducer.publicarUsuarioRegistrado(usuarioGuardado);
 
         return ResponseEntity.ok("Usuario registrado exitosamente");
     }
