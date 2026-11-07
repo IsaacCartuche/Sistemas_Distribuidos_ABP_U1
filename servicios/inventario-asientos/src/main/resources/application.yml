@@ -5,6 +5,10 @@ spring:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/db_inventario
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
@@ -13,3 +17,8 @@ spring:
 
 server:
   port: 8085
+
+inventario:
+  ttl-segundos: ${INVENTARIO_TTL_SEGUNDOS:300}
+  expiracion-habilitada: ${INVENTARIO_EXPIRACION_HABILITADA:true}
+  intervalo-expiracion-ms: ${INVENTARIO_INTERVALO_EXPIRACION_MS:10000}

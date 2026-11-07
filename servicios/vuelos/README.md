@@ -165,20 +165,80 @@ mvn test
 - `VueloControllerTest`: contrato HTTP con MockMvc, `Location`, DTOs, validaciones,
   filtros y fechas, errores 400/404/409 y rechazo de JSON inválido.
 
-Las pruebas usan mocks: no abren conexiones PostgreSQL/RabbitMQ ni modifican bases de datos.
-La integración real del repositorio con PostgreSQL, Docker y las futuras integraciones de eventos
-debe verificarse por separado. No se incluyen Saga, autenticación, bloqueo de asientos o TTL en esta fase.
+Las dos clases anteriores usan mocks: no abren conexiones PostgreSQL/RabbitMQ ni modifican bases de datos.
+Las pruebas PostgreSQL son optativas y se omiten si `VUELOS_POSTGRES_INTEGRATION` no vale `true`.
+No se incluyen Saga, autenticación, bloqueo de asientos o TTL en esta fase.
 
-### Resultado de la validación de esta entrega
+### Integración con PostgreSQL real y aislado
 
-Se ejecutaron **57 pruebas: 18 de servicio y 39 de controlador**, todas correctas y sin omisiones.
-El entorno disponible tenía JDK 25, no JDK 17. La ejecución inicial de `mvn test` falló porque
-la versión de Byte Buddy gestionada por Spring Boot 3.2.0 no reconoce Java 25 al crear mocks de clases.
-Sin cambiar versiones, se completó la ejecución con una propiedad temporal para las pruebas:
+Desde `servicios/vuelos/`, con JDK 17, Maven y Docker funcionando:
 
 ```bash
-mvn -DargLine=-Dnet.bytebuddy.experimental=true test
+bash scripts/test-postgres.sh
 ```
 
-La compilación mantiene el objetivo Java 17 definido por el proyecto. Queda pendiente repetir
-`mvn test` sobre un JDK 17 real; la propiedad experimental anterior solo se usó para este entorno.
+El script crea un contenedor nuevo `postgres:15-alpine`, con `db_vuelos` y credenciales exclusivas
+de prueba, datos en `tmpfs` y puerto host libre asignado por Docker, accesible solo por `127.0.0.1`.
+Monta `sql/init.sql` en modo lectura para inicializar únicamente esa base nueva. Espera a que
+PostgreSQL acepte conexiones TCP y ejecuta `mvn test`. Al terminar, incluso si Maven falla,
+detiene exclusivamente el contenedor creado, que se elimina automáticamente con sus datos temporales.
+No utiliza Compose ni volúmenes persistentes.
+
+`VueloPostgresIntegrationTest` arranca el contexto completo de Spring Boot y un servidor HTTP
+en un puerto aleatorio. Usa JPA, JDBC y PostgreSQL reales, sin mocks. Hibernate mantiene
+`ddl-auto=validate` y Spring no ejecuta scripts SQL al arrancar.
+
+Las variables `VUELOS_TEST_DB_URL`, `VUELOS_TEST_DB_USER` y `VUELOS_TEST_DB_PASSWORD` son
+exclusivas de esta prueba y las configura el script; no cambian `application.yml` ni `.env`.
+La clase inserta y actualiza datos: su activación manual debe apuntar únicamente a una base aislada
+de prueba previamente inicializada, nunca a desarrollo compartido o producción.
+
+Cobertura de los **13 casos de integración**:
+
+- Crear con HTTP 201, `Location`, ID generado y fecha de creación; consultar por ID.
+- Comprobar persistencia decimal, fecha, hora, estado y nombre de base `db_vuelos`.
+- Listar y buscar las ocho combinaciones posibles de origen/destino/fecha, incluidos filtros
+  ausentes, comparación sin distinguir mayúsculas, combinación AND y orden de resultados.
+- Actualizar y volver a consultar todos los campos editables, incluido el precio máximo
+  `99999999.99`; conservar identidad y fecha de creación.
+- Búsqueda sin coincidencias (`[]`), consulta/actualización inexistente (404),
+  y solicitudes inválidas (400) sin insertar filas.
+
+### Resultado comprobado de la verificación (2026-11-07)
+
+| Grupo | Ejecutadas | Fallidas/errores | Omitidas |
+|-------|------------|-----------------|----------|
+| Servicio | 18 | 0 | 0 |
+| Controlador con MockMvc | 39 | 0 | 0 |
+| Integración PostgreSQL/HTTP real | 13 | 0 | 0 |
+| **Total final** | **70** | **0** | **0** |
+
+Entorno: OpenJDK **17.0.20.1**, Maven **3.9.12**, Spring Boot **3.2.0**, PostgreSQL **15.19**,
+Docker **29.9.3** y Compose **v5.7.0**. Las 57 pruebas originales también se ejecutaron primero
+con `mvn test`, correctamente, sin propiedades experimentales de Byte Buddy.
+
+La primera ejecución contra PostgreSQL detectó **8 errores de integración** en listados/búsquedas:
+la consulta JPQL con parámetros opcionales nulos provocaba `lower(bytea)` y SQLState `42P18`.
+Un intento intermedio con casts redujo el problema a 4 errores, pero no resolvió el parámetro fecha
+nulo (`bytea` a `date`). La solución final utiliza `JpaSpecificationExecutor`/Criteria para añadir
+solo los filtros presentes, con parámetros tipados y el mismo contrato REST. La ejecución final
+del script, contra otro contenedor nuevo, pasó los 70 casos sin errores.
+
+Compatibilidad confirmada: `Integer`/`SERIAL`, `BigDecimal`/`NUMERIC(10,2)`,
+`LocalDate`/`DATE`, `LocalTime`/`TIME`, enum textual/`VARCHAR(20)` y
+`LocalDateTime`/`TIMESTAMP`. PostgreSQL conserva microsegundos en el timestamp, frente a los
+nanosegundos que puede entregar el reloj Java en la respuesta inicial; la prueba considera esa precisión.
+
+**Estado:** catálogo REST listo para comenzar la integración funcional y desarrollar inventario.
+No equivale todavía a cumplir toda la definición de listo de la constitución:
+
+- No se probaron la imagen de Vuelos, el despliegue con Compose ni el acceso a través del gateway.
+- El Dockerfile declara `EXPOSE 8080`, mientras el servicio escucha en 8081; es metadato que debe
+  alinearse en la fase de despliegue. Su `ENTRYPOINT` tampoco expande `JAVA_OPTS`.
+- La validación HTTP usa puerto aleatorio; no certifica que 8081 esté disponible en otro entorno.
+  La prueba usa credenciales temporales, no valida credenciales de instalaciones existentes.
+- No se probaron integración RabbitMQ, eventos, idempotencia de mensajes ni Saga.
+- Persisten los límites del catálogo: sin paginación, control de actualizaciones concurrentes
+  ni gestión de zonas horarias. El SQL no incluye CHECKs de precio/capacidad/ruta ni restringe
+  los valores de estado; esas reglas se validan en la API, no frente a escrituras SQL externas.
+- `capacidadDisponible` sigue siendo informativa y no autoriza reservas.
