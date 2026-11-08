@@ -14,6 +14,18 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USER:guest}
     password: ${RABBITMQ_PASS:guest}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    connection-timeout: 2s
+    template:
+      mandatory: true
 
 server:
   port: 8081
+
+vuelos:
+  outbox:
+    habilitada: ${VUELOS_OUTBOX_HABILITADA:true}
+    intervalo-ms: ${VUELOS_OUTBOX_INTERVALO_MS:5000}
+    confirm-timeout-ms: ${VUELOS_OUTBOX_CONFIRM_TIMEOUT_MS:5000}
+    reintento-segundos: ${VUELOS_OUTBOX_REINTENTO_SEGUNDOS:5}

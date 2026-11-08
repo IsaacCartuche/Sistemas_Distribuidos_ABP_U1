@@ -1,6 +1,6 @@
 # Servicio de Vuelos
 
-Primera fase funcional del catálogo de vuelos, rutas y horarios.
+Catálogo de vuelos, rutas y horarios con control optimista y publicación transaccional de `vuelos.actualizados`.
 
 ## Tecnología y alcance
 
@@ -8,7 +8,7 @@ Primera fase funcional del catálogo de vuelos, rutas y horarios.
 - Spring Web, Spring Data JPA, Jakarta Validation y PostgreSQL.
 - Base de datos propia: **`db_vuelos`**. Tabla `vuelos`, compatible con `sql/init.sql`.
 - Puerto HTTP: **8081**.
-- Las dependencias y propiedades AMQP preexistentes se conservan; esta fase no publica ni consume eventos.
+- Spring AMQP publica mediante una outbox propia. No hay listeners ni Inbox: no existen contratos de entrada acordados para Vuelos.
 
 **La disponibilidad real pertenece a `inventario-asientos`.** `capacidadDisponible` es únicamente
 un dato informativo del catálogo, editable en esta fase para mantener compatibilidad con la tabla.
@@ -22,7 +22,8 @@ com.empresa.vuelos
 ├── api              # Controlador, DTOs y errores HTTP
 ├── application      # Lógica de negocio y excepciones
 ├── domain           # Vuelo y EstadoVuelo
-└── persistence      # Repositorio Spring Data JPA
+├── persistence      # Repositorio Spring Data JPA
+└── outbox           # Snapshot transaccional, validación, publicador y worker
 ```
 
 ## Configuración y ejecución local
@@ -31,6 +32,13 @@ Requisitos: JDK 17, Maven y una base PostgreSQL `db_vuelos` previamente iniciali
 `sql/init.sql` en un entorno de desarrollo. El servicio utiliza `ddl-auto: validate`:
 valida el esquema existente y no crea ni modifica tablas. No ejecute el SQL sobre bases compartidas
 sin coordinación; el arranque no lo ejecuta automáticamente.
+
+Para una base existente, aplicar manualmente **`sql/migracion-version-outbox.sql` antes de desplegar
+esta versión**, con respaldo, servicio detenido y `psql -v ON_ERROR_STOP=1`. Añade `version INTEGER
+NOT NULL DEFAULT 0` a vuelos y crea `vuelos_outbox`; no elimina vuelos ni cambia los datos previos del
+catálogo. No genera eventos históricos. El DEFAULT inicializa la revisión técnica de los vuelos anteriores.
+La migración se comprueba repetida en una base temporal; no se aplicó sobre la base local del proyecto.
+`IF NOT EXISTS` no valida objetos preexistentes con una estructura distinta: revisar el esquema antes de aplicar.
 
 Variables de conexión:
 
@@ -60,10 +68,9 @@ También puede ejecutar el JAR con opciones JVM explícitas:
 POSTGRES_PORT=5431 java -Xmx512m -Xms256m -jar target/servicio-vuelos-1.0.0.jar
 ```
 
-Las propiedades `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_USER` y `RABBITMQ_PASS` permanecen
-configuradas para fases posteriores. No se necesita RabbitMQ para las pruebas de esta fase.
-El Dockerfile preexistente no se ha adaptado en esta entrega; la construcción con el contexto raíz
-de Compose y la ejecución de `JAVA_OPTS` siguen pendientes de la fase de despliegue.
+Las propiedades `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_USER` y `RABBITMQ_PASS` configuran el
+publicador. Su desconexión no impide arrancar ni confirmar operaciones REST: el evento permanece en
+PostgreSQL para reintento. Los tests unitarios/MockMvc no requieren broker.
 
 ## API REST
 
@@ -123,6 +130,12 @@ Reglas:
 - Los identificadores deben ser enteros positivos.
 - `id` y `fechaCreacion` son generados por el servidor y no forman parte del DTO de entrada.
 - PUT no crea vuelos inexistentes y conserva ID y fecha de creación.
+- PUT idéntico al valor persistido no escribe ni genera evento. Se comparan ciudades recortadas y precio
+  numérico (125.5 equivale a 125.50). Para hora se compara la representación de java.sql.Time del mapper
+  Hibernate 6.3 (redondeada a milisegundos), evitando duplicados por fracciones que el mapper no conserva.
+- `@Version` impide que dos transacciones que leyeron la misma versión sobrescriban silenciosamente sus
+  cambios: la perdedora recibe 409. La versión se utiliza como `payload.revision` del evento, sin añadir
+  campos obligatorios a los DTOs REST existentes. No se cambia POST ni se impone unicidad por ruta/fecha.
 
 Ejemplos:
 
@@ -149,6 +162,7 @@ Los errores de validación de campos incluyen además el mapa `errores`.
 - `400 Bad Request`: campos inválidos, reglas de negocio, JSON o parámetros incorrectos.
 - `404 Not Found`: vuelo inexistente.
 - `409 Conflict`: conflicto con restricciones de persistencia, sin exponer SQL interno.
+  También actualización optimista concurrente; debe consultarse el estado antes de reintentar.
 
 Ejemplo de regla de negocio:
 
@@ -166,6 +180,10 @@ Ejemplo de regla de negocio:
 
 ```bash
 mvn test
+# Suite completa con PostgreSQL y RabbitMQ temporales:
+bash scripts/test-outbox.sh
+# Construcción del Dockerfile y smoke test de su imagen con PostgreSQL temporal, sin broker:
+bash scripts/test-docker.sh
 ```
 
 - `VueloServiceTest`: normalización, precisión decimal, validaciones de ruta/capacidad,
@@ -177,7 +195,8 @@ mvn test
 
 Las dos clases anteriores usan mocks: no abren conexiones PostgreSQL/RabbitMQ ni modifican bases de datos.
 Las pruebas PostgreSQL son optativas y se omiten si `VUELOS_POSTGRES_INTEGRATION` no vale `true`.
-No se incluyen Saga, autenticación, bloqueo de asientos o TTL en esta fase.
+La suite AMQP se activa con `VUELOS_RABBIT_INTEGRATION=true`, configurada por `test-outbox.sh`.
+No se incluyen Saga de reservas, autenticación, bloqueo de asientos o TTL en Vuelos.
 
 ### Integración con PostgreSQL real y aislado
 
@@ -190,8 +209,9 @@ bash scripts/test-postgres.sh
 El script crea un contenedor nuevo `postgres:15-alpine`, con `db_vuelos` y credenciales exclusivas
 de prueba, datos en `tmpfs` y puerto host libre asignado por Docker, accesible solo por `127.0.0.1`.
 Monta `sql/init.sql` en modo lectura para inicializar únicamente esa base nueva. Espera a que
-PostgreSQL acepte conexiones TCP y ejecuta `mvn test`. Al terminar, incluso si Maven falla,
-detiene exclusivamente el contenedor creado, que se elimina automáticamente con sus datos temporales.
+PostgreSQL acepte conexiones TCP y ejecuta `mvn verify`. Comprueba la migración dos veces sobre otra
+base temporal con filas previas y una fila outbox de fixture, preservando valores y mensajes.
+Al terminar, incluso si Maven falla, retira exclusivamente los contenedores creados y sus datos temporales.
 No utiliza Compose ni volúmenes persistentes.
 
 `VueloPostgresIntegrationTest` arranca el contexto completo de Spring Boot y un servidor HTTP
@@ -214,7 +234,7 @@ Cobertura de los **13 casos de integración**:
 - Búsqueda sin coincidencias (`[]`), consulta/actualización inexistente (404),
   y solicitudes inválidas (400) sin insertar filas.
 
-### Resultado comprobado de la verificación (2026-11-07)
+### Resultado histórico de la primera verificación (2026-11-07, antes de aliases/outbox)
 
 | Grupo | Ejecutadas | Fallidas/errores | Omitidas |
 |-------|------------|-----------------|----------|
@@ -239,16 +259,172 @@ Compatibilidad confirmada: `Integer`/`SERIAL`, `BigDecimal`/`NUMERIC(10,2)`,
 `LocalDateTime`/`TIMESTAMP`. PostgreSQL conserva microsegundos en el timestamp, frente a los
 nanosegundos que puede entregar el reloj Java en la respuesta inicial; la prueba considera esa precisión.
 
-**Estado:** catálogo REST listo para comenzar la integración funcional y desarrollar inventario.
-No equivale todavía a cumplir toda la definición de listo de la constitución:
+## Evento vuelos.actualizados
 
-- No se probaron la imagen de Vuelos, el despliegue con Compose ni el acceso a través del gateway.
-- El Dockerfile declara `EXPOSE 8080`, mientras el servicio escucha en 8081; es metadato que debe
-  alinearse en la fase de despliegue. Su `ENTRYPOINT` tampoco expande `JAVA_OPTS`.
-- La validación HTTP usa puerto aleatorio; no certifica que 8081 esté disponible en otro entorno.
-  La prueba usa credenciales temporales, no valida credenciales de instalaciones existentes.
-- No se probaron integración RabbitMQ, eventos, idempotencia de mensajes ni Saga.
-- Persisten los límites del catálogo: sin paginación, control de actualizaciones concurrentes
-  ni gestión de zonas horarias. El SQL no incluye CHECKs de precio/capacidad/ruta ni restringe
-  los valores de estado; esas reglas se validan en la API, no frente a escrituras SQL externas.
-- `capacidadDisponible` sigue siendo informativa y no autoriza reservas.
+Exchange **`vuelos.events`**, tipo **topic**, durable según la constitución; routing key exacta
+**`vuelos.actualizados`**. La aplicación no declara el exchange ni colas/bindings. No se añaden consumidores
+ni Inbox a Vuelos. En las referencias accesibles del equipo solo se encontró el nombre constitucional,
+no consumidores o bindings definitivos. Su definición corresponde al acuerdo con Isaac y destinatarios.
+
+Se registra por cada actualización real persistida, **no** en GET, PUT idéntico ni rollback.
+**POST no emite eventos**: la emisión al crear un vuelo permanece pendiente de acuerdo y no se activa.
+Cambiar únicamente `capacidadDisponible` sigue siendo un cambio persistido y produce una revisión nueva,
+pero ese contador **no aparece** en el mensaje ni permite autorizar reservas.
+
+Ejemplo ilustrativo (los IDs son de ejemplo, no datos suplidos en producción):
+
+```json
+{
+  "eventId": "10000000-0000-0000-0000-000000000001",
+  "correlationId": "20000000-0000-0000-0000-000000000001",
+  "timestamp": "2026-11-07T21:00:00Z",
+  "tipo": "vuelos.actualizados",
+  "payload": {
+    "vueloId": 1,
+    "origen": "Quito",
+    "destino": "Loja",
+    "fechaSalida": "2027-05-10",
+    "horaSalida": "09:30",
+    "precio": 130.00,
+    "estado": "ACTIVO",
+    "capacidadTotal": 100,
+    "revision": 1
+  }
+}
+```
+
+`eventId` identifica el hecho y `correlationId` identifica la operación de actualización del catálogo:
+se generan una sola vez al registrar el evento y se conservan en reintentos. No representan una reserva,
+no se equiparan entre sí y no se inventa reservaId/token. El timestamp es un instante UTC del reloj del
+servicio. Fecha/hora de salida conservan sus tipos locales; no se les agrega zona ni se reinterpretan como UTC.
+No se añade moneda, mapa de asientos, disponibilidad real, usuarios o pagos que Vuelos no conoce.
+
+El servicio hace flush del UPDATE optimista antes de registrar el evento y refresca la entidad para
+serializar los valores realmente persistidos (precisión de TIME/NUMERIC incluida). La revisión del
+mensaje coincide con `vuelos.version` en esa transacción. Un conflicto o un fallo al registrar la outbox
+revierte **vuelo, versión y evento**. No se envían mensajes directamente desde esa transacción.
+
+### Tabla vuelos_outbox y entrega
+
+| Columna | Uso |
+|---------|-----|
+| event_id UUID PK | Identidad estable del evento |
+| correlation_id UUID | Traza de la operación del catálogo |
+| vuelo_id INTEGER FK | Referencia a la base propia de Vuelos |
+| revision INTEGER | Versión de la actualización, mayor que cero |
+| tipo | Solo vuelos.actualizados |
+| mensaje TEXT | Sobre JSON persistido, no se reconstruye al reintentar |
+| estado | PENDIENTE, ENVIADO o ERROR_DATOS |
+| intentos / ultimo_error | Intentos confirmados del worker y motivo diagnóstico |
+| creado_en / siguiente_intento / enviado_en | Tiempos operativos TIMESTAMPTZ de PostgreSQL |
+
+`UNIQUE(vuelo_id, revision)` impide múltiples hechos para una misma revisión. El índice parcial de
+PENDIENTES evita recorrer todo el historial. La tabla JDBC participa en la misma conexión/transacción
+que JPA; Hibernate validate no crea ni valida esta tabla, por eso se instala con el SQL explícito.
+
+El worker reclama una fila mediante **FOR UPDATE SKIP LOCKED**, en una transacción independiente.
+Mantiene solo su lock de fila outbox durante el envío y espera del confirm, no locks del catálogo.
+Dos workers no reclaman simultáneamente la misma fila. Si un proceso cae, PostgreSQL libera el lock
+y revierte la marca; no hay lease o estado EN_PROCESO abandonado que rescatar.
+
+Se usan mensajes persistentes, UTF-8/JSON, messageId=eventId, confirms correlacionados, returns y
+**mandatory=true**. Solo ACK del broker sin return permite marcar ENVIADO. NACK, timeout, desconexión,
+exchange inexistente o falta de binding dejan PENDIENTE y un backoff exponencial hasta 300 segundos.
+El proceso sigue arrancando y atendiendo REST aunque el broker falle. Un error de persistencia al
+marcar ENVIADO se propaga para rollback: puede haber una reentrega con el mismo ID.
+
+La garantía es **al menos una vez**, no exactamente una vez. ENVIADO significa aceptación del broker
+sin devolución, no procesamiento por un destinatario concreto. Los consumidores futuros deben deduplicar
+eventId y proteger sus proyecciones frente a revisiones antiguas: varios workers/reintentos pueden alterar
+el orden. No se garantiza orden global ni entrega a un consumidor que todavía no tiene una cola enlazada.
+
+Antes de contactar RabbitMQ se valida JSON estricto, claves únicas y campos exactos; UUID/IDs/revisión
+deben coincidir con la fila, timestamp UTC, precio, estado, ruta, capacidad y horarios deben ser válidos.
+No se permiten campos ajenos como capacidadDisponible. Un fallo permanente conserva cuerpo e identidad
+en ERROR_DATOS, sin reintento automático ni reparación. Las caídas del broker siguen siendo temporales.
+
+| Variable propia | Defecto |
+|----------------|---------|
+| VUELOS_OUTBOX_HABILITADA | true |
+| VUELOS_OUTBOX_INTERVALO_MS | 5000 |
+| VUELOS_OUTBOX_CONFIRM_TIMEOUT_MS | 5000 |
+| VUELOS_OUTBOX_REINTENTO_SEGUNDOS | 5 |
+
+Deshabilitar polling no desactiva el registro transaccional. No se purgan filas de outbox en esta fase.
+
+## Concurrencia y límites conservados
+
+@Version detecta transacciones solapadas que leyeron la misma versión. No equivale a un If-Match de
+cliente: un PUT secuencial construido desde datos antiguos puede seguir reemplazando campos, porque
+se preservó el contrato REST sin revisión obligatoria. Precondiciones de cliente son una ampliación
+posterior si se necesitan; no se simula esa garantía. POST mantiene su semántica actual y no adquiere
+una unicidad artificial por origen/destino/fecha. No hay deduplicación de POST por clave de cliente.
+
+## Docker desde el contexto real de Compose
+
+Desde la raíz del repositorio:
+
+```bash
+docker build -f servicios/vuelos/Dockerfile -t servicio-vuelos .
+```
+
+El Dockerfile multietapa compila con Maven 3.9.12/Java 17 y ejecuta con JRE 17 Alpine, puerto 8081.
+Solo copia POM, src y entrypoint propios. `Dockerfile.dockerignore` excluye target, archivos ajenos y
+JARs locales: la construcción no depende de una compilación previa ni de archivos no versionados.
+El build empaqueta con `-DskipTests`; las pruebas se ejecutan separadamente con Maven/script completo.
+
+El entrypoint hace exec de Java, separa las opciones convencionales de JAVA_OPTS sin eval ni glob,
+y conserva argumentos de aplicación. También admite JAVA_TOOL_OPTIONS (interpretado por la JVM).
+Usar flags válidos, por ejemplo **JAVA_OPTS=-Xmx512m -Xms256m**. Para valores con espacios/quoting
+complejo se recomienda JAVA_TOOL_OPTIONS; el shell no reinterpreta comillas dentro de JAVA_OPTS.
+
+**Pendientes de Isaac, no aplicados en archivos compartidos**:
+
+- Dentro de Docker, POSTGRES_HOST debe apuntar al servicio propio (`postgres-vuelos`), POSTGRES_PORT
+  a 5432, y RABBITMQ_HOST al servicio `rabbitmq` de la misma red, salvo un despliegue externo explícito.
+  Los defaults localhost que Compose envía actualmente no apuntan a otros contenedores.
+- El fallback de JAVA_OPTS mostrado en Compose es `Xmx512m -Xms256m`: falta el guion inicial de Xmx.
+  Al respetar ahora esa variable, ese valor es inválido para Java. Isaac debe corregir el valor efectivo
+  o usar JAVA_TOOL_OPTIONS; este servicio no lo "repara" silenciosamente.
+- Preparar/importar definitions válido y acordar colas/bindings para vuelos.actualizados.
+  No se inventan destinos definitivos; la cola vuelos.actualizados.pruebas existe solo en tests aislados.
+- Acordar con Isabel permisos de escritura y comprobar Location detrás del Gateway. Se conservan
+  ambos prefijos del servicio, pero no se modifican rutas ni filtros del Gateway.
+
+## Resultado comprobado de esta fase
+
+`bash scripts/test-outbox.sh` ejecutó **mvn verify → BUILD SUCCESS** con Java **17.0.20.1**,
+Maven **3.9.12**, PostgreSQL **15.19** y RabbitMQ **3.13.7** temporales:
+
+| Suite | Aprobadas | Fallos | Errores | Omitidas |
+|-------|-----------|--------|---------|----------|
+| VueloControllerTest | 49 | 0 | 0 | 0 |
+| VueloServiceTest | 20 | 0 | 0 | 0 |
+| PublicadorVuelosTest | 69 | 0 | 0 | 0 |
+| VuelosOutboxWorkerTest | 5 | 0 | 0 | 0 |
+| VueloPostgresIntegrationTest | 13 | 0 | 0 | 0 |
+| VuelosOutboxPostgresRabbitTest | 18 | 0 | 0 | 0 |
+| **Total** | **174** | **0** | **0** | **0** |
+
+Las 78 pruebas anteriores siguen incluidas, ampliadas con concurrencia/409, no-op, escalas decimales,
+precisión del mapper TIME, snapshot/revisión, rollback, validación, errores permanentes, ACK y return
+reales, ausencia de binding, pausa/reanudación del broker temporal, recuperación al reconstruir el
+publicador, reentrega tras rollback posterior al ACK y dos workers concurrentes. NACK se indujo en una
+prueba unitaria; no se afirma haber provocado un NACK real del broker. La reconstrucción se probó como
+componentes nuevos, no como reinicio de toda la JVM. Los logs SIN_DESTINO/CONFIRM_TIMEOUT/ERROR_DATOS
+son fallos esperados inducidos por las pruebas, no fallos de la suite final.
+
+`bash scripts/test-docker.sh` construyó y arrancó la imagen final sobre una red y PostgreSQL temporales.
+Comprobó JAVA_OPTS en el proceso Java, puerto 8081, ambas rutas, POST/GET/PUT, PUT idéntico, revisión 1,
+un evento persistido pendiente y servicio HTTP disponible con RabbitMQ inaccesible. Este smoke test
+se contabiliza aparte de JUnit. Un fallo inicial de su comprobación docker top se corrigió incluyendo
+PID en la salida; el script completo final pasó. Se excluyeron JARs locales del contexto en todo momento.
+
+Las migraciones se ejecutaron solo en bases temporales, preservando los datos previos. No se tocó la
+base local, Inventario ni contenedores existentes. Los tests retiran sus contenedores/redes temporales;
+las imágenes de verificación y caché de build pueden permanecer localmente.
+
+**No se comprobó el despliegue completo con el Compose compartido ni recepción por servicios reales**:
+faltan los ajustes de conexión/topología de Isaac y contratos de consumidores. Tampoco se activó
+emisión al crear vuelos. El servicio no interpreta vuelos.actualizados como orden de inicializar,
+redimensionar o liberar asientos ni ejecuta compensaciones de reservas.

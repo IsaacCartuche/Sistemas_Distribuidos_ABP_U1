@@ -9,6 +9,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -22,6 +23,10 @@ public class Vuelo {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
+
+    @Version
+    @Column(nullable = false)
+    private Integer version;
 
     @Column(nullable = false, length = 100)
     private String origen;
@@ -78,6 +83,7 @@ public class Vuelo {
     }
 
     public Integer getId() { return id; }
+    public Integer getVersion() { return version; }
     public String getOrigen() { return origen; }
     public String getDestino() { return destino; }
     public LocalDate getFechaSalida() { return fechaSalida; }

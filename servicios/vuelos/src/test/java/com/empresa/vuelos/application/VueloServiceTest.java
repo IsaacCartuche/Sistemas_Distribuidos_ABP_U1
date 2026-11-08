@@ -5,6 +5,7 @@ import com.empresa.vuelos.api.dto.VueloResponse;
 import com.empresa.vuelos.domain.EstadoVuelo;
 import com.empresa.vuelos.domain.Vuelo;
 import com.empresa.vuelos.persistence.VueloRepository;
+import com.empresa.vuelos.outbox.VueloOutboxRegistro;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,6 +31,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.inOrder;
 
 @ExtendWith(MockitoExtension.class)
 class VueloServiceTest {
@@ -38,10 +40,11 @@ class VueloServiceTest {
     private VueloRepository repository;
 
     private VueloService service;
+    private final VueloOutboxRegistro outbox = org.mockito.Mockito.mock(VueloOutboxRegistro.class);
 
     @BeforeEach
     void setUp() {
-        service = new VueloService(repository);
+        service = new VueloService(repository, outbox);
     }
 
     @Test
@@ -166,6 +169,10 @@ class VueloServiceTest {
         assertThat(response.destino()).isEqualTo("Loja");
         assertThat(response.capacidadTotal()).isEqualTo(120);
         verify(repository).save(vuelo);
+        var orden = inOrder(repository, outbox);
+        orden.verify(repository).save(vuelo);
+        orden.verify(repository).flush();
+        orden.verify(outbox).registrar(vuelo);
     }
 
     @Test
@@ -184,6 +191,25 @@ class VueloServiceTest {
         assertThatThrownBy(() -> service.actualizar(1, request("Quito", "Loja", 100, 101)))
                 .isInstanceOf(ReglaNegocioException.class);
         verifyNoInteractions(repository);
+    }
+
+    @Test
+    void actualizarIdenticoNoEscribeNiGeneraEvento() {
+        when(repository.findById(1)).thenReturn(Optional.of(vueloExistente()));
+        service.actualizar(1, request(" Quito ", " Loja ", 100, 80));
+        verify(repository, never()).save(any());
+        verify(repository, never()).flush();
+        verifyNoInteractions(outbox);
+    }
+
+    @Test
+    void escalaDecimalDiferenteNoEsCambioDePrecio() {
+        when(repository.findById(1)).thenReturn(Optional.of(vueloExistente()));
+        VueloRequest request = new VueloRequest("Quito", "Loja", LocalDate.of(2027, 5, 10), LocalTime.of(9, 30),
+                new BigDecimal("125.5"), EstadoVuelo.ACTIVO, 100, 80);
+        service.actualizar(1, request);
+        verify(repository, never()).save(any());
+        verifyNoInteractions(outbox);
     }
 
     private VueloRequest request(String origen, String destino, int total, int disponible) {

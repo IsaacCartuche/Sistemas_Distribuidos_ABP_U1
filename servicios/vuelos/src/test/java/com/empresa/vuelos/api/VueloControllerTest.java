@@ -201,6 +201,17 @@ class VueloControllerTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/vuelos", "/api/vuelos"})
+    void conflictoOptimistaEs409EnAmbasRutas(String base) throws Exception {
+        when(service.actualizar(eq(1), any())).thenThrow(
+                new org.springframework.orm.ObjectOptimisticLockingFailureException("Vuelo", 1));
+        mvc.perform(put(base + "/1").contentType(MediaType.APPLICATION_JSON).content(jsonValido()))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.detail").value("El vuelo cambió concurrentemente; consulte su estado antes de reintentar"));
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"0", "-1", "abc", "2147483648"})
     void rechazaIdInvalido(String id) throws Exception {
         mvc.perform(get(URL + "/" + id)).andExpect(status().isBadRequest());

@@ -29,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Optativa: ejecutar solamente contra un PostgreSQL de prueba aislado, inicializado con sql/init.sql. */
 @EnabledIfEnvironmentVariable(named = "VUELOS_POSTGRES_INTEGRATION", matches = "true")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "vuelos.outbox.habilitada=false")
 class VueloPostgresIntegrationTest {
 
     private static final String URL = "/api/v1/vuelos";

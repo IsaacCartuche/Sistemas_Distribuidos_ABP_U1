@@ -5,6 +5,7 @@ import com.empresa.vuelos.application.VueloNoEncontradoException;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.beans.TypeMismatchException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -44,6 +45,12 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     public ProblemDetail conflicto(DataIntegrityViolationException exception) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT,
                 "Los datos del vuelo entran en conflicto con las restricciones de persistencia");
+    }
+
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ProblemDetail actualizacionConcurrente(OptimisticLockingFailureException exception) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT,
+                "El vuelo cambió concurrentemente; consulte su estado antes de reintentar");
     }
 
     @Override
