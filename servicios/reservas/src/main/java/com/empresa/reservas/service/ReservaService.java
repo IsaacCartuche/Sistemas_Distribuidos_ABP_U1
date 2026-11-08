@@ -4,7 +4,9 @@ import com.empresa.reservas.entity.Reserva;
 import com.empresa.reservas.repository.ReservaRepository;
 import com.empresa.reservas.dto.CrearReservaRequest;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -16,9 +18,17 @@ import java.math.BigDecimal;
 public class ReservaService {
 
     private final ReservaRepository reservaRepository;
+    private final ReservaPersistenceService persistenceService;
+    private final TransactionTemplate transactionTemplate;
 
-    public ReservaService(ReservaRepository reservaRepository) {
+    public ReservaService(
+            ReservaRepository reservaRepository,
+            ReservaPersistenceService persistenceService,
+            TransactionTemplate transactionTemplate) {
+
         this.reservaRepository = reservaRepository;
+        this.persistenceService = persistenceService;
+        this.transactionTemplate = transactionTemplate;
     }
 
     public Optional<Reserva> buscarPorId(Integer id) {
@@ -29,7 +39,6 @@ public class ReservaService {
         return reservaRepository.findByIdempotencyKey(clave);
     }
 
-    @Transactional
     public Reserva crearReserva(CrearReservaRequest request) {
 
         if (request == null
@@ -45,14 +54,12 @@ public class ReservaService {
                 || request.idempotencyKey().isBlank()
                 || request.idempotencyKey().length() > 100) {
             throw new IllegalArgumentException(
-                    "Datos de reserva invalidos"
-            );
+                    "Datos de reserva invalidos");
         }
 
         String clave = request.idempotencyKey();
 
-        Optional<Reserva> existente =
-                reservaRepository.findByIdempotencyKey(clave);
+        Optional<Reserva> existente = reservaRepository.findByIdempotencyKey(clave);
 
         if (existente.isPresent()) {
             Reserva anterior = existente.get();
@@ -62,8 +69,7 @@ public class ReservaService {
                     || !anterior.getAsiento().equals(request.asiento())
                     || anterior.getTotal().compareTo(request.total()) != 0) {
                 throw new IllegalArgumentException(
-                        "Clave de idempotencia reutilizada con datos diferentes"
-                );
+                        "Clave de idempotencia reutilizada con datos diferentes");
             }
 
             return anterior;
@@ -83,7 +89,31 @@ public class ReservaService {
         reserva.setCorrelationId(UUID.randomUUID());
         reserva.setToken(UUID.randomUUID());
 
-        return reservaRepository.save(reserva);
+        try {
+            return persistenceService.guardar(reserva);
+
+        } catch (DataIntegrityViolationException ex) {
+
+            Optional<Reserva> encontrada = transactionTemplate.execute(
+                    status -> reservaRepository.findByIdempotencyKey(clave));
+
+            if (encontrada == null || encontrada.isEmpty()) {
+                throw ex;
+            }
+
+            Reserva anterior = encontrada.get();
+
+            if (!anterior.getVueloId().equals(request.vueloId())
+                    || !anterior.getUsuarioId().equals(request.usuarioId())
+                    || !anterior.getAsiento().equals(request.asiento())
+                    || anterior.getTotal().compareTo(request.total()) != 0) {
+
+                throw new IllegalArgumentException(
+                        "Clave de idempotencia reutilizada con datos diferentes");
+            }
+
+            return anterior;
+        }
     }
 
 }

@@ -9,161 +9,206 @@ import org.mockito.ArgumentCaptor;
 import java.util.Optional;
 import java.math.BigDecimal;
 
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-
-
 class ReservaServiceTest {
+        private final ReservaRepository repository = mock(ReservaRepository.class);
 
-    private final ReservaRepository repository =
-            mock(ReservaRepository.class);
+        private final ReservaPersistenceService persistenceService = mock(ReservaPersistenceService.class);
 
-    private final ReservaService service =
-            new ReservaService(repository);
+        private final TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
 
-    @Test
-    void buscarPorIdDebeRetornarReservaExistente() {
-        Reserva reserva = new Reserva();
+        private final ReservaService service = new ReservaService(
+                        repository,
+                        persistenceService,
+                        transactionTemplate);
 
-        when(repository.findById(1))
-                .thenReturn(Optional.of(reserva));
+        @Test
+        void buscarPorIdDebeRetornarReservaExistente() {
+                Reserva reserva = new Reserva();
 
-        Optional<Reserva> resultado = service.buscarPorId(1);
+                when(repository.findById(1))
+                                .thenReturn(Optional.of(reserva));
 
-        assertTrue(resultado.isPresent());
-        assertSame(reserva, resultado.get());
+                Optional<Reserva> resultado = service.buscarPorId(1);
 
-        verify(repository).findById(1);
-    }
+                assertTrue(resultado.isPresent());
+                assertSame(reserva, resultado.get());
 
-    @Test
-    void buscarPorIdempotencyKeyDebeRetornarReservaExistente() {
-        Reserva reserva = new Reserva();
-        String clave = "reserva-prueba-001";
+                verify(repository).findById(1);
+        }
 
-        when(repository.findByIdempotencyKey(clave))
-                .thenReturn(Optional.of(reserva));
+        @Test
+        void buscarPorIdempotencyKeyDebeRetornarReservaExistente() {
+                Reserva reserva = new Reserva();
+                String clave = "reserva-prueba-001";
 
-        Optional<Reserva> resultado =
-                service.buscarPorIdempotencyKey(clave);
+                when(repository.findByIdempotencyKey(clave))
+                                .thenReturn(Optional.of(reserva));
 
-        assertTrue(resultado.isPresent());
-        assertSame(reserva, resultado.get());
+                Optional<Reserva> resultado = service.buscarPorIdempotencyKey(clave);
 
-        verify(repository).findByIdempotencyKey(clave);
-    }
+                assertTrue(resultado.isPresent());
+                assertSame(reserva, resultado.get());
 
-    @Test
-    void crearReservaDebeGenerarIdentificadoresSaga() {
+                verify(repository).findByIdempotencyKey(clave);
+        }
 
-        CrearReservaRequest request = new CrearReservaRequest(
-                15,
-                7,
-                "12A",
-                new BigDecimal("150.00"),
-                "reserva-001"
-        );
+        @Test
+        void crearReservaDebeGenerarIdentificadoresSaga() {
 
-        when(repository.findByIdempotencyKey("reserva-001"))
-                .thenReturn(Optional.empty());
+                CrearReservaRequest request = new CrearReservaRequest(
+                                15,
+                                7,
+                                "12A",
+                                new BigDecimal("150.00"),
+                                "reserva-001");
 
-        when(repository.save(any(Reserva.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+                when(repository.findByIdempotencyKey("reserva-001"))
+                                .thenReturn(Optional.empty());
 
-        Reserva resultado = service.crearReserva(request);
+                when(persistenceService.guardar(any(Reserva.class)))
+                                .thenAnswer(invocation -> invocation.getArgument(0));
 
-        assertNotNull(resultado);
-        assertEquals("PENDIENTE", resultado.getEstado());
+                Reserva resultado = service.crearReserva(request);
 
-        assertEquals(15, resultado.getVueloId());
-        assertEquals(7, resultado.getUsuarioId());
-        assertEquals("12A", resultado.getAsiento());
+                assertNotNull(resultado);
+                assertEquals("PENDIENTE", resultado.getEstado());
 
-        assertNotNull(resultado.getCorrelationId());
-        assertNotNull(resultado.getToken());
+                assertEquals(15, resultado.getVueloId());
+                assertEquals(7, resultado.getUsuarioId());
+                assertEquals("12A", resultado.getAsiento());
 
-        assertNotEquals(
-                resultado.getCorrelationId(),
-                resultado.getToken()
-        );
+                assertNotNull(resultado.getCorrelationId());
+                assertNotNull(resultado.getToken());
 
-        assertEquals(
-                "reserva-001",
-                resultado.getIdempotencyKey()
-        );
+                assertNotEquals(
+                                resultado.getCorrelationId(),
+                                resultado.getToken());
 
-        ArgumentCaptor<Reserva> captor =
-                ArgumentCaptor.forClass(Reserva.class);
+                assertEquals(
+                                "reserva-001",
+                                resultado.getIdempotencyKey());
 
-        verify(repository).save(captor.capture());
+                ArgumentCaptor<Reserva> captor = ArgumentCaptor.forClass(Reserva.class);
 
-        assertSame(resultado, captor.getValue());
-    }
+                verify(persistenceService).guardar(captor.capture());
 
-    @Test
-    void crearReservaRepetidaDebeRetornarLaExistente() {
+                assertSame(resultado, captor.getValue());
+        }
 
-        CrearReservaRequest request = new CrearReservaRequest(
-                15,
-                7,
-                "12A",
-                new BigDecimal("150.00"),
-                "reserva-001"
-        );
+        @Test
+        void crearReservaRepetidaDebeRetornarLaExistente() {
 
-        Reserva existente = new Reserva();
-        existente.setVueloId(15);
-        existente.setUsuarioId(7);
-        existente.setAsiento("12A");
-        existente.setTotal(new BigDecimal("150.00"));
-        existente.setIdempotencyKey("reserva-001");
-        existente.setEstado("PENDIENTE");
+                CrearReservaRequest request = new CrearReservaRequest(
+                                15,
+                                7,
+                                "12A",
+                                new BigDecimal("150.00"),
+                                "reserva-001");
 
-        when(repository.findByIdempotencyKey("reserva-001"))
-                .thenReturn(Optional.of(existente));
+                Reserva existente = new Reserva();
+                existente.setVueloId(15);
+                existente.setUsuarioId(7);
+                existente.setAsiento("12A");
+                existente.setTotal(new BigDecimal("150.00"));
+                existente.setIdempotencyKey("reserva-001");
+                existente.setEstado("PENDIENTE");
 
-        Reserva resultado = service.crearReserva(request);
+                when(repository.findByIdempotencyKey("reserva-001"))
+                                .thenReturn(Optional.of(existente));
 
-        assertSame(existente, resultado);
-        assertEquals("PENDIENTE", resultado.getEstado());
+                Reserva resultado = service.crearReserva(request);
 
-        verify(repository, never()).save(any(Reserva.class));
-        verify(repository).findByIdempotencyKey("reserva-001");
-    }
+                assertSame(existente, resultado);
+                assertEquals("PENDIENTE", resultado.getEstado());
 
-    @Test
-    void crearReservaConClaveReutilizadaYDatosDiferentesDebeFallar() {
+                verify(persistenceService, never()).guardar(any(Reserva.class));
+                verify(repository).findByIdempotencyKey("reserva-001");
+        }
 
-        CrearReservaRequest request = new CrearReservaRequest(
-                15,
-                7,
-                "14B",
-                new BigDecimal("150.00"),
-                "reserva-001"
-        );
+        @Test
+        void crearReservaConClaveReutilizadaYDatosDiferentesDebeFallar() {
 
-        Reserva existente = new Reserva();
-        existente.setVueloId(15);
-        existente.setUsuarioId(7);
-        existente.setAsiento("12A");
-        existente.setTotal(new BigDecimal("150.00"));
-        existente.setIdempotencyKey("reserva-001");
+                CrearReservaRequest request = new CrearReservaRequest(
+                                15,
+                                7,
+                                "14B",
+                                new BigDecimal("150.00"),
+                                "reserva-001");
 
-        when(repository.findByIdempotencyKey("reserva-001"))
-                .thenReturn(Optional.of(existente));
+                Reserva existente = new Reserva();
+                existente.setVueloId(15);
+                existente.setUsuarioId(7);
+                existente.setAsiento("12A");
+                existente.setTotal(new BigDecimal("150.00"));
+                existente.setIdempotencyKey("reserva-001");
 
-        IllegalArgumentException error = assertThrows(
-                IllegalArgumentException.class,
-                () -> service.crearReserva(request)
-        );
+                when(repository.findByIdempotencyKey("reserva-001"))
+                                .thenReturn(Optional.of(existente));
 
-        assertEquals(
-                "Clave de idempotencia reutilizada con datos diferentes",
-                error.getMessage()
-        );
+                IllegalArgumentException error = assertThrows(
+                                IllegalArgumentException.class,
+                                () -> service.crearReserva(request));
 
-        verify(repository, never()).save(any(Reserva.class));
-    }
+                assertEquals(
+                                "Clave de idempotencia reutilizada con datos diferentes",
+                                error.getMessage());
+
+                verify(repository, never()).save(any(Reserva.class));
+        }
+
+        @Test
+        void conflictoConcurrenteDebeRecuperarReservaExistente() {
+
+                CrearReservaRequest request = new CrearReservaRequest(
+                                15,
+                                7,
+                                "12A",
+                                new BigDecimal("150.00"),
+                                "reserva-concurrente-001");
+
+                Reserva existente = new Reserva();
+                existente.setVueloId(15);
+                existente.setUsuarioId(7);
+                existente.setAsiento("12A");
+                existente.setTotal(new BigDecimal("150.00"));
+                existente.setIdempotencyKey("reserva-concurrente-001");
+                existente.setEstado("PENDIENTE");
+
+                // La primera consulta no encuentra ninguna reserva.
+                when(repository.findByIdempotencyKey("reserva-concurrente-001"))
+                                .thenReturn(Optional.empty(), Optional.of(existente));
+
+                // Simulamos que otra solicitud guardó primero.
+                when(persistenceService.guardar(any(Reserva.class)))
+                                .thenThrow(new DataIntegrityViolationException(
+                                                "Clave de idempotencia duplicada"));
+
+                // Ejecutamos el callback transaccional simulado.
+                when(transactionTemplate.execute(any(TransactionCallback.class)))
+                                .thenAnswer(invocation -> {
+                                        TransactionCallback<?> callback = invocation.getArgument(0);
+
+                                        TransactionStatus status = mock(TransactionStatus.class);
+
+                                        return callback.doInTransaction(status);
+                                });
+
+                Reserva resultado = service.crearReserva(request);
+
+                assertSame(existente, resultado);
+
+                verify(persistenceService).guardar(any(Reserva.class));
+
+                verify(repository, times(2))
+                                .findByIdempotencyKey("reserva-concurrente-001");
+        }
 
 }
