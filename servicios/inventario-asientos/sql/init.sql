@@ -29,8 +29,9 @@ CREATE INDEX IF NOT EXISTS idx_asientos_expiracion ON asientos(bloqueado_hasta)
 
 CREATE TABLE IF NOT EXISTS inventario_outbox (
     event_id UUID PRIMARY KEY,
-    token UUID NOT NULL REFERENCES retenciones(token),
-    tipo VARCHAR(50) NOT NULL CHECK (tipo = 'asiento.expirado'),
+    token UUID NOT NULL,
+    tipo VARCHAR(50) NOT NULL CHECK (tipo IN ('asiento.expirado', 'asiento.bloqueado', 'asiento.no_disponible',
+        'asiento.confirmado', 'asiento.confirmacion_rechazada')),
     mensaje TEXT NOT NULL,
     correlation_id UUID,
     estado VARCHAR(30) NOT NULL DEFAULT 'ESPERA_CONTEXTO'
@@ -40,16 +41,22 @@ CREATE TABLE IF NOT EXISTS inventario_outbox (
     siguiente_intento TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     enviado_en TIMESTAMPTZ,
     ultimo_error VARCHAR(100),
-    UNIQUE(tipo, token),
+    clave_negocio VARCHAR(64),
+    CONSTRAINT inventario_outbox_rechazo_clave_check CHECK
+        (tipo NOT IN ('asiento.no_disponible', 'asiento.confirmacion_rechazada') OR clave_negocio IS NOT NULL),
     CHECK (estado = 'ESPERA_CONTEXTO' OR correlation_id IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_pendientes ON inventario_outbox(siguiente_intento, creado_en)
     WHERE estado = 'PENDIENTE';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_retencion_tipo ON inventario_outbox(tipo, token)
+    WHERE tipo IN ('asiento.expirado', 'asiento.bloqueado', 'asiento.confirmado');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_resultado_negocio ON inventario_outbox(tipo, clave_negocio)
+    WHERE clave_negocio IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS inventario_inbox (
     consumidor VARCHAR(80) NOT NULL,
     event_id UUID NOT NULL,
-    tipo VARCHAR(30) NOT NULL CHECK (tipo IN ('reserva.creada', 'reserva.cancelada')),
+    tipo VARCHAR(50) NOT NULL CHECK (tipo IN ('reserva.creada', 'reserva.cancelada', 'asiento.confirmacion_solicitada')),
     huella CHAR(64) NOT NULL,
     resultado VARCHAR(80),
     recibido_en TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,

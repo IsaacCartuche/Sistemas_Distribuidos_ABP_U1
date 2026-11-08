@@ -11,11 +11,17 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.UUID;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /** Valida sin normalizar, reparar ni sustituir valores del mensaje persistido. */
 @Component
 public class ValidadorExpiracion {
+    public static final Set<String> TIPOS = Set.of("asiento.expirado", "asiento.bloqueado", "asiento.no_disponible",
+            "asiento.confirmado", "asiento.confirmacion_rechazada");
+    public static final Set<String> MOTIVOS = Set.of("ASIENTO_INEXISTENTE", "ASIENTO_OCUPADO", "TOKEN_DE_OTRA_RESERVA",
+            "TOKEN_INVALIDO", "RETENCION_TERMINAL", "SOLICITUD_INVALIDA", "RESERVA_NO_COINCIDE", "RESERVA_CANCELADA",
+            "SOLICITUD_RECHAZADA", "RETENCION_INEXISTENTE", "RETENCION_EXPIRADA", "ASIENTO_NO_DISPONIBLE");
     private static final Pattern UUID_CANONICO = Pattern.compile(
             "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
     private final ObjectReader reader;
@@ -31,12 +37,17 @@ public class ValidadorExpiracion {
             throw invalido("CORRELATION_ID_INCOHERENTE");
         }
         if (!reservaValida(evento.path("payload").get("reservaId"))) throw invalido("RESERVA_ID_INVALIDO");
+        if (fila.tipo().equals("asiento.no_disponible") || fila.tipo().equals("asiento.confirmacion_rechazada")) {
+            String motivo = texto(evento.path("payload").get("motivo"), "payload.motivo");
+            if (!MOTIVOS.contains(motivo)) throw invalido("MOTIVO_INVALIDO");
+        }
     }
 
     /** Solo el contexto ausente previsto puede completarse: no repara contexto parcialmente corrupto. */
     public ObjectNode validarEsperaContexto(OutboxRepository.Evento fila) {
         ObjectNode evento = validarBase(fila);
-        if (fila.correlationId() != null || !evento.has("correlationId") || !evento.get("correlationId").isNull()
+        if (!fila.tipo().equals("asiento.expirado") || fila.correlationId() != null
+                || !evento.has("correlationId") || !evento.get("correlationId").isNull()
                 || !evento.path("payload").has("reservaId") || !evento.path("payload").get("reservaId").isNull()) {
             throw invalido("CONTEXTO_INICIAL_INCOHERENTE");
         }
@@ -60,7 +71,9 @@ public class ValidadorExpiracion {
         if (raiz == null || !raiz.isObject()) throw invalido("RAIZ_INVALIDA");
         ObjectNode evento = (ObjectNode) raiz;
         if (!uuid(evento.get("eventId"), "eventId").equals(fila.eventId())) throw invalido("EVENT_ID_INCOHERENTE");
-        if (!"asiento.expirado".equals(texto(evento.get("tipo"), "tipo"))) throw invalido("TIPO_INVALIDO");
+        if (!TIPOS.contains(texto(evento.get("tipo"), "tipo")) || !evento.get("tipo").asText().equals(fila.tipo())) {
+            throw invalido("TIPO_INVALIDO");
+        }
         try {
             Instant.parse(texto(evento.get("timestamp"), "timestamp"));
         } catch (DateTimeParseException exception) {
@@ -69,7 +82,10 @@ public class ValidadorExpiracion {
         JsonNode payload = evento.get("payload");
         if (payload == null || !payload.isObject()) throw invalido("PAYLOAD_INVALIDO");
         enteroPositivo(payload.get("vueloId"), "payload.vueloId");
-        enteroPositivo(payload.get("asientoId"), "payload.asientoId");
+        // Un rechazo de bloqueo puede referirse a un asiento que NO existe. No se inventa un ID.
+        if (!(fila.tipo().equals("asiento.no_disponible") && payload.has("asientoId") && payload.get("asientoId").isNull())) {
+            enteroPositivo(payload.get("asientoId"), "payload.asientoId");
+        }
         if (!texto(payload.get("asiento"), "payload.asiento").matches("[A-Za-z0-9-]{1,10}")) {
             throw invalido("ASIENTO_INVALIDO");
         }

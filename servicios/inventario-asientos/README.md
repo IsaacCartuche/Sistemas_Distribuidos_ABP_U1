@@ -2,8 +2,8 @@
 
 Núcleo REST de disponibilidad, retenciones temporales y confirmación de asientos.
 Java **17**, Spring Boot **3.2.0**, JPA y PostgreSQL independiente **`db_inventario`**.
-Puerto HTTP **8085**. Sin interfaz gráfica. Publicación fiable de `asiento.expirado` mediante outbox
-y consumidor provisional de Reservas con Inbox, **deshabilitado por defecto** hasta acordar el contrato.
+Puerto HTTP **8085**. Sin interfaz gráfica. Inbox/Outbox para bloqueo, expiración y confirmación de
+asientos en la Saga. El listener permanece **deshabilitado por defecto** hasta verificar la topología compartida.
 
 ## Responsabilidades y estructura
 
@@ -65,6 +65,11 @@ entre instancias y `INSERT ... ON CONFLICT DO NOTHING` permite inicializaciones 
   código actualizado, incluso si el listener permanece apagado: la expiración consulta la asociación
   local para obtener su contexto. Solo añade dos tablas, sin modificar filas, entidades de retención
   ni tablas anteriores. `init.sql` incluye todo para nuevas instalaciones. No se ejecutó en bases existentes.
+- Para la ampliación Saga aplicar después **`sql/migracion-saga-inventario.sql`**. Añade
+  `clave_negocio`, amplía los tipos permitidos y el ancho de `inventario_inbox.tipo` a VARCHAR(50),
+  reemplaza la unicidad outbox por índices parciales y retira su FK de token para poder registrar
+  rechazos de tokens sin retención. No elimina ni actualiza filas. Es obligatoria antes del código nuevo;
+  `init.sql` ya incorpora el esquema final. Ninguna migración se ejecuta automáticamente.
 - Hibernate usa **`ddl-auto=validate`**: no crea ni modifica tablas. La aplicación no ejecuta
   automáticamente ninguno de estos scripts. La migración no se ha aplicado a bases existentes.
 
@@ -248,7 +253,7 @@ son esperados en la prueba concurrente del mismo token, se traducen a HTTP 409 y
 filas parciales. No fueron fallos de la suite. La limpieza fue invocada de forma explícita en
 integración; no se midió el temporizador de scheduling en tiempo de pared ni varias JVM.
 
-## Publicación fiable de asiento.expirado
+## Publicación fiable de eventos de Inventario
 
 ### Contexto de reserva: limitación explícita acordada para esta fase
 
@@ -273,7 +278,7 @@ En las pruebas reales se completa con **datos explícitos de fixtures**, no con 
 para las retenciones de desarrollo. Por eso las pruebas demuestran el transporte del contrato completo,
 pero **las expiraciones REST actuales quedan retenidas hasta resolver el contexto de reserva**.
 
-Las retenciones obtenidas por el consumidor provisional sí tienen una asociación durable recibida del
+Las retenciones obtenidas por el consumidor sí tienen una asociación durable recibida del
 mensaje validado en `inventario_solicitudes`. Su expiración consulta esa asociación e inserta directamente
 el evento completo en PENDIENTE en la misma transacción; no necesita completar contexto posteriormente.
 Solo se utiliza una asociación que obtuvo realmente la retención para ese asiento. Conocer un token REST
@@ -284,17 +289,22 @@ preexistente no permite apropiarse de él ni convertirlo en una reserva asociada
 | Columna | Uso |
 |---------|-----|
 | `event_id UUID PRIMARY KEY` | Identidad estable del hecho, generada al registrar la transición |
-| `token UUID REFERENCES retenciones(token)` | Retención que expiró |
-| `tipo VARCHAR(50)` | Restringido a `asiento.expirado` |
+| `token UUID NOT NULL` | Token real del proceso; un rechazo puede no tener retención, por eso ya no es FK |
+| `tipo VARCHAR(50)` | Uno de los cinco tipos de salida documentados en la Saga |
 | `mensaje TEXT` | JSON serializado; idéntico en todos los intentos una vez completado el contexto |
 | `correlation_id UUID` | Nulo mientras falta contexto; obligatorio al habilitar publicación |
 | `estado` | ESPERA_CONTEXTO, PENDIENTE, ENVIADO o ERROR_DATOS |
 | `intentos INTEGER` | Intentos cuya transacción de worker se confirmó |
 | `creado_en`, `siguiente_intento`, `enviado_en` | TIMESTAMPTZ operativos del reloj PostgreSQL |
 | `ultimo_error VARCHAR(100)` | Clasificación del fallo; sin cuerpos ni tokens en el log del worker |
+| `clave_negocio VARCHAR(64)` | Identidad estable de un intento rechazado; nula en resultados por retención |
 
-`UNIQUE(tipo, token)` impide más de un evento de negocio por expiración. El índice parcial de
-PENDIENTES evita recorrer el historial enviado. No se borran filas, ni se modifica el historial de retenciones.
+Un índice único parcial `(tipo, token)` protege expiraciones, bloqueos y confirmaciones. Otro índice
+único parcial `(tipo, clave_negocio)` protege rechazos por identidad del intento, sin usar eventId,
+timestamp o motivo como identidad. La clave incluye reserva, correlación, token y asiento solicitado:
+no mezcla rechazos de reservas diferentes que envían el mismo token. Los conflictos se manejan por
+esas claves, sin ocultar colisiones de la PK event_id. El índice de PENDIENTES evita recorrer el historial.
+No se borran filas ni se modifica el historial de retenciones.
 La tabla se accede mediante JDBC en la misma conexión administrada por el gestor transaccional JPA.
 `ddl-auto=validate` se conserva para las entidades JPA; esta tabla JDBC se instala mediante SQL explícito.
 
@@ -314,15 +324,20 @@ Antes de consultar la conexión RabbitMQ, `ValidadorExpiracion` comprueba el JSO
 - `eventId`, `correlationId` y `payload.token`: cadenas UUID canónicas y coherentes con las columnas
   `event_id`, `correlation_id` y `token` de la fila outbox, respectivamente.
 - `timestamp`: cadena ISO-8601 que identifica un instante (con zona/offset, no una fecha/hora local).
-- `tipo`: exactamente `asiento.expirado`.
+- `tipo`: uno de los tipos de salida acordados y coincidente con la columna `tipo` de la fila.
 - `payload`: objeto; `reservaId`: entero JSON o cadena no vacía, conservando el contrato previo.
 - `vueloId` y `asientoId`: enteros JSON positivos dentro del rango INTEGER de los modelos actuales.
+  Excepción explícita: en `asiento.no_disponible`, `asientoId` puede ser null si no pudo resolverse;
+  la clave sigue siendo obligatoria y nunca se fabrica un ID.
 - `asiento`: cadena de 1 a 10 caracteres alfanuméricos o guion, como el número de asiento de la API.
-- Todos esos campos son obligatorios y no admiten nulos. No se convierten cadenas a números,
+- En los rechazos se exige además un `payload.motivo` estable de la lista documentada.
+- Todos esos campos son obligatorios y no admiten nulos salvo la excepción anterior. No se convierten cadenas a números,
   no se rellenan valores, no se corrigen mensajes ni se vuelve a serializar el cuerpo al publicarlo.
 
 La validación comprueba estructura e integridad, no la existencia de una reserva externa: esa asociación
-sigue siendo responsabilidad de la integración futura con Sebastián. No añade campos ni cambia la routing key.
+sigue siendo responsabilidad del flujo de Reservas y su asociación local. Las clases de publicador/validador
+conservan sus nombres históricos `RabbitPublicadorExpiracion` y `ValidadorExpiracion`, pero atienden los
+cinco tipos desde una sola outbox, sin un segundo sistema de publicación.
 
 Un error permanente de validación deja la fila **ERROR_DATOS**, incrementa el contador y conserva el
 cuerpo y el eventId originales con un código diagnóstico en `ultimo_error`. No contacta RabbitMQ,
@@ -337,7 +352,7 @@ que rescatar: si cae el proceso, PostgreSQL libera el lock y la fila sigue pendi
 El diseño usa una conexión por envío y procesa un evento por ciclo; es deliberadamente sencillo,
 no un publicador de alto rendimiento.
 
-Publicación fija: exchange **`vuelos.events`**, routing key **`asiento.expirado`**, prioridad 10,
+Publicación: exchange **`vuelos.events`**, routing key igual al **tipo validado**, prioridad 10,
 mensaje persistente, `messageId = eventId`, `correlationId` real y contenido JSON UTF-8.
 La aplicación **no declara exchanges, colas ni bindings**: la topología corresponde a Isaac.
 
@@ -423,7 +438,7 @@ no son fallos de la ejecución final.
 **Publicación real comprobada en infraestructura temporal**, no solo mocks. **No comprobada ni
 habilitada de extremo a extremo con Reservas del equipo**: faltan contexto real y topología compartida.
 
-### Resultado actual del refuerzo de validación (2026-11-07)
+### Resultado histórico del refuerzo de validación (2026-11-07)
 
 Se ejecutó primero `mvn test`: **121 aprobadas**, sin fallos/errores; las suites optativas de integración
 estaban desactivadas (Surefire reportó 27 elementos omitidos, antes de expandir los casos parametrizados).
@@ -452,7 +467,7 @@ en ESPERA_CONTEXTO, PENDIENTE y ENVIADO; verifica que filas, estados previos y m
 No se aplicó ninguna migración sobre la base existente del proyecto. La inicialización nueva y el
 empaquetado del JAR también se comprobaron; reportes en `target/surefire-reports/`.
 
-## Consumo provisional de Reservas con Inbox
+## Consumo de Reservas con Inbox
 
 ### Inspección y decisiones pendientes
 
@@ -466,7 +481,8 @@ un contrato en los directorios de documentación revisados de las otras referenc
 no mostró esas colas/bindings en el vhost `/` durante la inspección. No se hizo fetch, así que se informa
 solo sobre las referencias que ya estaban disponibles localmente, no sobre cambios remotos no descargados.
 
-Se implementó el siguiente **contrato provisional para pruebas**, no un acuerdo final de equipo:
+El contrato de la fase 7A se mantuvo compatible y se amplió con la confirmación acordada con Sebastián.
+El siguiente ejemplo de creación anterior sigue admitido:
 
 ```json
 {
@@ -489,7 +505,7 @@ correlación y token. Se acepta reserva numérica positiva o cadena no vacía mi
 con el almacenado (la API de inicialización normaliza a mayúsculas). JSON, UUID, tipos, timestamp y campos
 son obligatorios; se rechazan duplicados de claves y discrepancias entre routing key y `tipo`.
 
-Política conservadora provisional: **una reserva se asocia a un solo asiento, token y correlación**.
+Política de esta implementación: **una reserva se asocia a un solo asiento, token y correlación**.
 Los identificadores no pueden reasignarse con otro mensaje. Cambios de asiento, varios asientos por
 reserva o una nueva retención para una reserva cancelada requieren acordar otro protocolo; actualmente
 se rechazan y nunca provocan una liberación/bloqueo inesperado.
@@ -500,14 +516,14 @@ se rechazan y nunca provocan una liberación/bloqueo inesperado.
 inventario.entrada → ReservasListener → validación estricta → ProcesadorReservas (@Transactional)
   → INSERT Inbox con clave única
   → asociación durable / marca de cancelación
-  → InventarioService.bloquear o liberar (misma transacción)
-  → resultado Inbox → COMMIT → retorno listener → ACK automático del contenedor
+  → InventarioService.bloquear / liberar / confirmar (misma transacción)
+  → resultado Inbox + resultado Outbox → COMMIT → retorno listener → ACK automático del contenedor
 ```
 
-El consumidor no publica directamente a RabbitMQ. El único evento de salida añadido al flujo es la
-expiración mediante la outbox existente. `asiento.bloqueado` y `asiento.no_disponible` **no se publican**:
-sus payloads y destinatarios/resultados siguen pendientes de Sebastián. El resultado local no sustituye
-esa respuesta distribuida; por eso esta implementación no constituye todavía una Saga operativa completa.
+El consumidor no publica directamente a RabbitMQ. Los resultados de bloqueo y confirmación se guardan
+en la misma outbox que las expiraciones, dentro de la misma transacción que Inbox y estado. El único
+publicador posterior conserva confirms/returns/mandatory y la recuperación existente. La integración
+con los servicios reales del equipo todavía requiere despliegue de topología y pruebas conjuntas.
 
 ### Tablas nuevas
 
@@ -592,7 +608,7 @@ rearranque del container listener y recuperación/reproceso desde DLQ tras indis
 El rearranque probado es del listener, no de toda la JVM. La migración se aplica dos veces en la base
 temporal de migraciones y verifica que no modifica los datos anteriores.
 
-### Resultado comprobado de esta fase
+### Resultado histórico de la fase 7A
 
 Ejecución final: **`bash scripts/test-outbox.sh` → `mvn verify` → BUILD SUCCESS**.
 Java **17.0.20.1**, Maven **3.9.12**, Spring Boot **3.2.0**, PostgreSQL **15.19** y RabbitMQ **3.13.7**.
@@ -621,6 +637,138 @@ El JAR se empaquetó correctamente. Reportes: `target/surefire-reports/`.
 No se aplicaron migraciones ni mensajes sobre el entorno existente del equipo. El listener está probado
 en aislamiento, pero **no está habilitado en la configuración por defecto ni integrado con Reservas real**.
 
+## Contratos Saga implementados
+
+### Eventos y significado
+
+Todos usan `vuelos.events`, routing key igual a `tipo`, `eventId` UUID único, `correlationId` del proceso,
+timestamp UTC y payload con `reservaId`, `vueloId`, `asientoId`, `asiento` y `token`. No se incluyen usuarios,
+pagos ni datos financieros. El eventId de un resultado es distinto del mensaje entrante y permanece
+estable al republicar; los otros identificadores se conservan sin equipararlos.
+
+| Entrada / condición | Salida persistida |
+|---------------------|-------------------|
+| `reserva.creada`, nueva retención confirmada en PostgreSQL | `asiento.bloqueado` |
+| `reserva.creada`, rechazo definitivo de negocio | `asiento.no_disponible` + motivo |
+| `asiento.confirmacion_solicitada`, transición a RESERVADO | `asiento.confirmado` |
+| Confirmación de la misma retención ya confirmada | Resultado idempotente; como máximo un `asiento.confirmado` |
+| `asiento.confirmacion_solicitada`, rechazo definitivo | `asiento.confirmacion_rechazada` + motivo |
+| Expiración real | `asiento.expirado`, con el comportamiento anterior |
+
+**Solicitud de confirmación**: el sobre anterior con `tipo: asiento.confirmacion_solicitada` y
+`payload.asientoId` positivo obligatorio, además de reserva, vuelo, número, token y correlación.
+Para creación/cancelación anteriores sin asientoId se mantiene compatibilidad: se resuelve por vuelo
+y número. Si se envía asientoId, se valida y se contrasta; no se corrige un ID contradictorio.
+
+En un rechazo los identificadores describen lo solicitado, no autorizan el cambio del asiento. Si una
+creación sin ID no puede resolverse a un asiento existente, `asiento.no_disponible` incluye
+`asientoId: null` con motivo explícito. No se fabrica un ID. Los demás resultados requieren ID positivo;
+las confirmaciones rechazadas conservan el ID recibido, incluso si el rechazo fue por incoherencia.
+Esta excepción debe respetarse en el DTO de rechazo de Reservas.
+
+### Motivos de negocio estables
+
+| Motivo | Significado |
+|--------|-------------|
+| ASIENTO_INEXISTENTE | No se localizó el asiento solicitado |
+| ASIENTO_OCUPADO | El asiento no estaba disponible para un nuevo bloqueo |
+| TOKEN_DE_OTRA_RESERVA | El token está asociado a otra reserva |
+| TOKEN_INVALIDO | No corresponde al token de la asociación o intenta adoptar un token REST |
+| RETENCION_TERMINAL | Token liberado o terminado; no puede reactivarse |
+| SOLICITUD_INVALIDA | Campos válidos en formato, pero ID/número de asiento contradictorios |
+| RESERVA_NO_COINCIDE | Reserva, correlación o asiento no coinciden con la asociación |
+| RESERVA_CANCELADA | La reserva ya tiene marca durable de cancelación |
+| SOLICITUD_RECHAZADA | El intento ya había sido rechazado |
+| RETENCION_INEXISTENTE | No existe una retención asociada para confirmar |
+| RETENCION_EXPIRADA | El TTL venció o la retención ya está EXPIRADA |
+| ASIENTO_NO_DISPONIBLE | El estado/propietario actual no permite confirmar |
+
+JSON malformado, campos ausentes, UUID inválidos o eventId reutilizado con otro contenido son errores
+permanentes de mensaje (DLQ), **no** eventos de rechazo de negocio. Un fallo PostgreSQL o conflicto
+optimista revierte Inbox, estado y Outbox y se reintenta de forma acotada. Una nueva lectura puede
+determinar ocupación y producir el rechazo; si solo persiste un fallo técnico, se rechaza a DLQ sin
+inventar una condición de negocio.
+
+### Confirmación, orden e idempotencia
+
+El procesador bloquea la asociación, contrasta reserva/token/correlación y ambos identificadores del
+asiento, clasifica rechazos y llama a **InventarioService.confirmar** para la transición. No escribe por
+su cuenta RESERVADO ni mantiene otra implementación de confirmación. Cuando detecta una retención
+vigente en estado pero ya vencida, reutiliza `expirarUno` y registra expiración/rechazo conjuntamente.
+
+- El mismo eventId y contenido devuelve el resultado Inbox, sin eventos nuevos. Las huellas previas
+  sin asientoId se conservan compatibles; el nuevo campo participa solo cuando estaba presente.
+- Un nuevo eventId con el mismo intento tampoco renueva TTL ni duplica el resultado de negocio:
+  los éxitos son únicos por tipo/token y los rechazos por tipo/identidad semántica del intento.
+- `asiento.bloqueado` se registra solo al crear una retención nueva; no hay backfill de bloqueos antiguos.
+- Una confirmación repetida sobre RESERVADO devuelve el hecho confirmado sin otra transición ni otro
+  evento. Si la retención se confirmó previamente por REST, la primera solicitud válida puede registrar
+  ese hecho una sola vez, sin modificar de nuevo el asiento.
+- Confirmación antes de creación se rechaza RETENCION_INEXISTENTE, sin crear asociación ni bloqueo.
+  No se guarda como una confirmación pendiente que pudiera ejecutarse más tarde. Su reentrega conserva
+  el rechazo; Reservas debe cancelar o enviar una nueva solicitud coherente según su estado real.
+- Confirmación tras TTL no resucita la retención. Confirmación y expiración concurrentes se resuelven
+  mediante las transacciones y @Version existentes. No queda un evento de éxito si hay rollback.
+- Cancelación posterior a confirmación no libera RESERVADO ni ejecuta compensaciones financieras.
+- Los eventos pueden entregarse desordenados; Reservas debe mantener sus estados terminales y no
+  interpretar un evento de bloqueo antiguo como autorización posterior a una expiración/cancelación.
+
+### Migración y topología pendientes de despliegue
+
+`migracion-saga-inventario.sql` se ejecuta manualmente después de las migraciones anteriores, con el
+servicio detenido, respaldo y `ON_ERROR_STOP=1`. Se conserva `ddl-auto=validate`. Reemplaza CHECKs de tipos,
+amplía Inbox.tipo de 30 a 50 caracteres, añade clave_negocio e índices parciales, y elimina la FK de
+Outbox.token: un rechazo válido puede referirse a un token que nunca obtuvo retención. No se elimina
+la FK de solicitudes hacia asientos, ni las tablas/filas existentes. La validación y el productor
+transaccional protegen los eventos positivos. No se ejecutó sobre la base local.
+
+La constitución ya contempla `asiento.bloqueado` y `asiento.no_disponible`; los tres eventos de confirmación
+son el acuerdo adicional de esta fase, no nombres que se hayan encontrado en origin/main. Las referencias
+accesibles de Sebastián siguen sin publicar esos contratos, aunque confirmó que adaptará sus servicios.
+En origin/isaac faltan el binding de `asiento.confirmacion_solicitada` hacia `inventario.entrada` y los
+destinos de `asiento.bloqueado`, `asiento.no_disponible`, `asiento.confirmado` y
+`asiento.confirmacion_rechazada`. Los destinos los coordina Isaac con Sebastián; la prueba los enlaza
+solo en un broker aislado a `reservas.alta`, sin fijar topología compartida por código.
+
+El listener sigue **apagado por defecto**. Es necesario verificar bindings, DLQ y aislamiento de tokens
+respecto de Notificaciones antes de habilitarlo. No se modificaron Compose, definitions ni servicios ajenos.
+
+### Resultado de validación de la ampliación Saga
+
+Ejecución final: **`bash scripts/test-outbox.sh` → `mvn verify` → BUILD SUCCESS**.
+Java **17.0.20.1**, Maven **3.9.12**, Spring Boot **3.2.0**, PostgreSQL **15.19** y RabbitMQ **3.13.7**.
+
+| Suite | Aprobadas | Fallos | Errores | Omitidas |
+|-------|-----------|--------|---------|----------|
+| InventarioControllerTest | 29 | 0 | 0 | 0 |
+| InventarioServiceTest | 20 | 0 | 0 | 0 |
+| OutboxWorkerTest | 5 | 0 | 0 | 0 |
+| RabbitPublicadorExpiracionTest | 76 | 0 | 0 | 0 |
+| InventarioPostgresTest | 21 | 0 | 0 | 0 |
+| OutboxRabbitPostgresTest | 20 | 0 | 0 | 0 |
+| ValidadorReservaTest | 49 | 0 | 0 | 0 |
+| ReservasListenerTest | 2 | 0 | 0 | 0 |
+| ConsumidorDeshabilitadoTest | 1 | 0 | 0 | 0 |
+| InboxReservasPostgresRabbitTest | 42 | 0 | 0 | 0 |
+| **Total** | **265** | **0** | **0** | **0** |
+
+182 pruebas son unitarias/REST/configuración; 83 son de integración PostgreSQL, 62 de ellas también con
+RabbitMQ real. Se verificaron bloqueo nuevo y rechazo publicados, motivos estables, nulidad explícita
+de ID inexistente, duplicados, confirmación y confirmaciones concurrentes, tokens/identidades incorrectas,
+confirmación anterior a creación, posterior al TTL y simultánea con expiración, cancelación tardía sobre
+RESERVADO, rollback de Inbox/Outbox/estado, reentrega real después de commit sin ACK en ambos flujos,
+broker inaccesible, confirms/returns y reintento sin destino con el mismo mensaje/eventId/timestamp.
+
+La migración se aplicó dos veces en una base temporal que contenía Inbox, solicitudes, Outbox y retenciones
+de la versión anterior; se verificaron los registros previos sin alterarlos. El JAR se empaquetó correctamente.
+Los logs de conexión rota y rechazo permanente corresponden a fallos inducidos por las pruebas, no a
+fallos de la suite. Reportes: `target/surefire-reports/`.
+
+Se inspeccionó la base local mediante una transacción READ ONLY: existían Inbox/Outbox, pero Inbox.tipo
+seguía en VARCHAR(30) y Outbox no tenía clave_negocio. La nueva migración sigue pendiente de aplicación
+local autorizada. Los contenedores del equipo no se detuvieron; los temporales se retiraron al finalizar.
+La comunicación real se comprobó en aislamiento, **no** con Reservas/Pagos reales ni la topología compartida.
+
 ## Integraciones pendientes
 
 - Acordar con Vuelos cómo validar existencia y autorizar la inicialización del mapa de asientos,
@@ -629,10 +777,10 @@ en aislamiento, pero **no está habilitado en la configuración por defecto ni i
   de reserva si es única y no se reutiliza tras terminar. No se implementa aún un `reserva_id` externo.
 - Con Sebastián: origen, tipo y asociación real de `reservaId` y `correlationId` por token,
   incluida su persistencia antes de la expiración y el tratamiento de eventos ESPERA_CONTEXTO.
-- Con Isaac: instalar/verificar exchange topic durable, cola durable `reservas.alta` y binding exacto
-  `asiento.expirado`, sin propagar tokens a colas de notificación. No se corrigieron archivos compartidos.
-- RabbitMQ/Saga: validar y habilitar el consumidor provisional; acordar los demás eventos
-  (`asiento.bloqueado`, `asiento.liberado`, `asiento.no_disponible`) y el protocolo final de confirmación.
+- Con Isaac: instalar/verificar los bindings de entrada/salida acordados, DLQ y destinos con Sebastián,
+  sin propagar tokens a colas de notificación. No se corrigieron archivos compartidos.
+- Saga completa: probar conjuntamente con Reservas/Pagos adaptados al contrato; `asiento.liberado`
+  y la compensación posterior a una reserva confirmada siguen fuera de esta fase.
 - La cancelación de un asiento ya RESERVADO necesita un contrato específico de compensación;
   no se habilita mediante una liberación de retención duplicada.
 - Autenticación/autorización del gateway y exposición de operaciones de administración pendientes.

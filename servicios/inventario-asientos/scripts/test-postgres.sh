@@ -31,7 +31,9 @@ container_id=$(docker run --detach --rm \
     --mount "type=bind,source=$SERVICE_DIR/sql/migracion-outbox.sql,target=/verificacion/outbox.sql,readonly" \
     --mount "type=bind,source=$SERVICE_DIR/sql/migracion-outbox-validacion.sql,target=/verificacion/validacion.sql,readonly" \
     --mount "type=bind,source=$SERVICE_DIR/sql/migracion-inbox-reservas.sql,target=/verificacion/inbox.sql,readonly" \
+    --mount "type=bind,source=$SERVICE_DIR/sql/migracion-saga-inventario.sql,target=/verificacion/saga.sql,readonly" \
     --mount "type=bind,source=$SERVICE_DIR/src/test/resources/sql/outbox-antes-validacion.sql,target=/verificacion/fixtures-outbox.sql,readonly" \
+    --mount "type=bind,source=$SERVICE_DIR/src/test/resources/sql/saga-antes-migracion.sql,target=/verificacion/fixtures-saga.sql,readonly" \
     --mount "type=bind,source=$SERVICE_DIR/src/test/resources/sql/esquema-original.sql,target=/verificacion/original.sql,readonly" \
     postgres:15-alpine)
 ready=false
@@ -63,14 +65,21 @@ docker exec "$container_id" psql -U inventario_test -d db_inventario_migracion -
 docker exec "$container_id" psql -U inventario_test -d db_inventario_migracion -v ON_ERROR_STOP=1 \
     -f /verificacion/fixtures-outbox.sql -f /verificacion/validacion.sql -f /verificacion/validacion.sql \
     -f /verificacion/inbox.sql -f /verificacion/inbox.sql \
+    -f /verificacion/fixtures-saga.sql -f /verificacion/saga.sql -f /verificacion/saga.sql \
     -c "DO \$\$ BEGIN
         IF (SELECT count(*) FROM inventario_outbox) <> 3
            OR (SELECT count(DISTINCT estado) FROM inventario_outbox) <> 3
            OR (SELECT count(*) FROM inventario_outbox WHERE mensaje = '{\"fixture\":\"conservar\"}') <> 3
            OR (SELECT count(*) FROM retenciones) <> 3
            OR (SELECT count(*) FROM asientos) <> 2
-           OR (SELECT count(*) FROM inventario_inbox) <> 0
-           OR (SELECT count(*) FROM inventario_solicitudes) <> 0
+           OR (SELECT count(*) FROM inventario_inbox) <> 1
+           OR (SELECT resultado FROM inventario_inbox) <> 'ASIENTO_BLOQUEADO'
+           OR (SELECT huella FROM inventario_inbox) <> repeat('a', 64)
+           OR (SELECT count(*) FROM inventario_solicitudes) <> 1
+           OR (SELECT reserva_clave FROM inventario_solicitudes) <> '123'
+           OR (SELECT estado FROM inventario_solicitudes) <> 'BLOQUEADA'
+           OR NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_outbox_retencion_tipo')
+           OR NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_outbox_resultado_negocio')
            OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'inventario_outbox'::regclass
                          AND conname = 'inventario_outbox_estado_check'
                          AND pg_get_constraintdef(oid) LIKE '%ERROR_DATOS%')

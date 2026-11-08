@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Stream;
@@ -68,5 +69,22 @@ class ValidadorReservaTest {
     void routingDistintaNoAutorizaOperacion() {
         assertThatThrownBy(() -> validador.validar(valido().getBytes(StandardCharsets.UTF_8), "reserva.cancelada"))
                 .hasMessage("TIPO_ROUTING_INCOHERENTE");
+    }
+    @Test
+    void confirmacionExigeIdentidadCompletaDelAsiento() throws Exception {
+        var json = (ObjectNode) new ObjectMapper().readTree(valido());
+        json.put("tipo", "asiento.confirmacion_solicitada");
+        ((ObjectNode) json.get("payload")).put("asientoId", 2);
+        assertThat(validador.validar(json.toString().getBytes(StandardCharsets.UTF_8), "asiento.confirmacion_solicitada").asientoId()).isEqualTo(2);
+    }
+    @ParameterizedTest
+    @ValueSource(strings = {"ausente", "null", "0", "-1", "1.5", "\"2\"", "true", "2147483648"})
+    void confirmacionSinIdValidoEsMensajeInvalido(String valor) throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        var json = (ObjectNode) mapper.readTree(valido());
+        json.put("tipo", "asiento.confirmacion_solicitada");
+        if (!valor.equals("ausente")) ((ObjectNode) json.get("payload")).set("asientoId", mapper.readTree(valor));
+        assertThatThrownBy(() -> validador.validar(json.toString().getBytes(StandardCharsets.UTF_8), "asiento.confirmacion_solicitada"))
+                .hasMessage("ASIENTO_ID_INVALIDO");
     }
 }

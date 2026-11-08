@@ -22,7 +22,8 @@ public class ValidadorReserva {
         catch (java.io.IOException exception) { throw error("JSON_INVALIDO"); }
         if (json == null || !json.isObject()) throw error("SOBRE_INVALIDO");
         String tipo = texto(json.get("tipo"), "tipo");
-        if (!(tipo.equals("reserva.creada") || tipo.equals("reserva.cancelada")) || !tipo.equals(routingKey)) {
+        if (!(tipo.equals("reserva.creada") || tipo.equals("reserva.cancelada")
+                || tipo.equals("asiento.confirmacion_solicitada")) || !tipo.equals(routingKey)) {
             throw error("TIPO_ROUTING_INCOHERENTE");
         }
         Instant timestamp;
@@ -41,8 +42,16 @@ public class ValidadorReserva {
         }
         String asiento = texto(payload.get("asiento"), "asiento");
         if (!asiento.matches("[A-Za-z0-9-]{1,10}")) throw error("ASIENTO_INVALIDO");
+        Integer asientoId = null;
+        if (payload.has("asientoId") || tipo.equals("asiento.confirmacion_solicitada")) {
+            JsonNode id = payload.get("asientoId");
+            if (id == null || !id.isIntegralNumber() || !id.canConvertToInt() || id.intValue() <= 0) {
+                throw error("ASIENTO_ID_INVALIDO");
+            }
+            asientoId = id.intValue();
+        }
         return new EventoReserva(uuid(json.get("eventId"), "eventId"), uuid(json.get("correlationId"), "correlationId"),
-                timestamp, tipo, reserva.deepCopy(), vuelo.intValue(), asiento, uuid(payload.get("token"), "token"));
+                timestamp, tipo, reserva.deepCopy(), vuelo.intValue(), asiento, uuid(payload.get("token"), "token"), asientoId);
     }
     private String texto(JsonNode nodo, String campo) {
         if (nodo == null || !nodo.isTextual() || nodo.asText().isBlank()) throw error("CAMPO_INVALIDO:" + campo);

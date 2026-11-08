@@ -14,29 +14,41 @@ public class OutboxRepository {
     private final JdbcTemplate jdbc;
     public OutboxRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
-    public record Evento(UUID eventId, UUID correlationId, UUID token, String mensaje, int intentos) { }
+    public record Evento(UUID eventId, UUID correlationId, UUID token, String mensaje, int intentos, String tipo) {
+        public Evento(UUID eventId, UUID correlationId, UUID token, String mensaje, int intentos) {
+            this(eventId, correlationId, token, mensaje, intentos, "asiento.expirado");
+        }
+    }
 
     public void registrar(UUID eventId, UUID token, String mensaje) {
         registrar(eventId, token, mensaje, null);
     }
 
     public void registrar(UUID eventId, UUID token, String mensaje, UUID correlationId) {
+        registrar(eventId, token, mensaje, correlationId, "asiento.expirado", null);
+    }
+
+    public void registrar(UUID eventId, UUID token, String mensaje, UUID correlationId, String tipo, String claveNegocio) {
+        boolean porRetencion = tipo.equals("asiento.expirado") || tipo.equals("asiento.bloqueado") || tipo.equals("asiento.confirmado");
+        String conflicto = porRetencion
+                ? "on conflict (tipo, token) where tipo in ('asiento.expirado', 'asiento.bloqueado', 'asiento.confirmado') do nothing"
+                : "on conflict (tipo, clave_negocio) where clave_negocio is not null do nothing";
         jdbc.update("""
-                insert into inventario_outbox(event_id, token, tipo, mensaje, correlation_id, estado)
-                values (?, ?, 'asiento.expirado', ?, ?, ?)
-                on conflict (tipo, token) do nothing
-                """, eventId, token, mensaje, correlationId, correlationId == null ? "ESPERA_CONTEXTO" : "PENDIENTE");
+                insert into inventario_outbox(event_id, token, tipo, mensaje, correlation_id, estado, clave_negocio)
+                values (?, ?, ?, ?, ?, ?, ?)
+                """ + conflicto, eventId, token, tipo, mensaje, correlationId,
+                correlationId == null ? "ESPERA_CONTEXTO" : "PENDIENTE", claveNegocio);
     }
 
     public Optional<Evento> reclamarPendiente() {
         return jdbc.query("""
-                select event_id, correlation_id, token, mensaje, intentos from inventario_outbox
+                select event_id, correlation_id, token, mensaje, intentos, tipo from inventario_outbox
                 where estado = 'PENDIENTE' and siguiente_intento <= CURRENT_TIMESTAMP
                 order by siguiente_intento, creado_en, event_id
                 limit 1 for update skip locked
                 """, (rs, n) -> new Evento(rs.getObject("event_id", UUID.class),
                 rs.getObject("correlation_id", UUID.class), rs.getObject("token", UUID.class),
-                rs.getString("mensaje"), rs.getInt("intentos")))
+                rs.getString("mensaje"), rs.getInt("intentos"), rs.getString("tipo")))
                 .stream().findFirst();
     }
 

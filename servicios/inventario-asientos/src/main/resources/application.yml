@@ -28,7 +28,7 @@ inventario:
   expiracion-habilitada: ${INVENTARIO_EXPIRACION_HABILITADA:true}
   intervalo-expiracion-ms: ${INVENTARIO_INTERVALO_EXPIRACION_MS:10000}
   consumidor:
-    # Contrato provisional: activar únicamente tras validar con Sebastián y preparar topología/DLQ.
+    # Contrato acordado: activar únicamente tras comprobar topología compartida y DLQ con Isaac.
     habilitado: ${INVENTARIO_CONSUMIDOR_HABILITADO:false}
   outbox:
     habilitada: ${INVENTARIO_OUTBOX_HABILITADA:true}

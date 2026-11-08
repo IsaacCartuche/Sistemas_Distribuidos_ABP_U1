@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.amqp.AmqpConnectException;
 import org.springframework.amqp.core.*;
 import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
@@ -118,6 +119,51 @@ class RabbitPublicadorExpiracionTest {
             return null;
         }).when(rabbit).send(anyString(), anyString(), any(Message.class), any(CorrelationData.class));
         publicador.publicar(cadena);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"asiento.bloqueado", "asiento.no_disponible", "asiento.confirmado", "asiento.confirmacion_rechazada"})
+    void publicaCadaTipoConSuRoutingKeyYConfirmacion(String tipo) throws Exception {
+        var json = (ObjectNode) new ObjectMapper().readTree(evento.mensaje());
+        json.put("tipo", tipo);
+        if (tipo.equals("asiento.no_disponible") || tipo.equals("asiento.confirmacion_rechazada")) {
+            ((ObjectNode) json.get("payload")).put("motivo", "TOKEN_INVALIDO");
+        }
+        var fila = new OutboxRepository.Evento(evento.eventId(), evento.correlationId(), evento.token(), json.toString(), 0, tipo);
+        doAnswer(call -> {
+            Message msg = call.getArgument(2);
+            assertThat(msg.getMessageProperties().getType()).isEqualTo(tipo);
+            assertThat(msg.getMessageProperties().getMessageId()).isEqualTo(evento.eventId().toString());
+            ((CorrelationData) call.getArgument(3)).getFuture().complete(new CorrelationData.Confirm(true, null));
+            return null;
+        }).when(rabbit).send(eq("vuelos.events"), eq(tipo), any(Message.class), any(CorrelationData.class));
+        publicador.publicar(fila);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ausente", "null", "123", "\"NO_ACORDADO\""})
+    void rechazoSinMotivoEstableNoContactaBroker(String motivo) throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        var json = (ObjectNode) mapper.readTree(evento.mensaje());
+        json.put("tipo", "asiento.confirmacion_rechazada");
+        if (!motivo.equals("ausente")) ((ObjectNode) json.get("payload")).set("motivo", mapper.readTree(motivo));
+        var fila = new OutboxRepository.Evento(evento.eventId(), evento.correlationId(), evento.token(), json.toString(), 0,
+                "asiento.confirmacion_rechazada");
+        assertThatThrownBy(() -> publicador.publicar(fila)).isInstanceOf(PublicadorExpiracion.FalloDatos.class);
+        verify(rabbit, never()).getConnectionFactory();
+    }
+
+    @Test
+    void noDisponiblePermiteIdNuloExplicitoSinInventarlo() throws Exception {
+        var json = (ObjectNode) new ObjectMapper().readTree(evento.mensaje());
+        json.put("tipo", "asiento.no_disponible");
+        var payload = (ObjectNode) json.get("payload");
+        payload.putNull("asientoId"); payload.put("motivo", "ASIENTO_INEXISTENTE");
+        var fila = new OutboxRepository.Evento(evento.eventId(), evento.correlationId(), evento.token(), json.toString(), 0, "asiento.no_disponible");
+        assertThatCode(() -> new ValidadorExpiracion(new ObjectMapper()).validar(fila)).doesNotThrowAnyException();
+        payload.remove("asientoId");
+        var incompleto = new OutboxRepository.Evento(evento.eventId(), evento.correlationId(), evento.token(), json.toString(), 0, "asiento.no_disponible");
+        assertThatThrownBy(() -> publicador.publicar(incompleto)).isInstanceOf(PublicadorExpiracion.FalloDatos.class);
     }
 
     private static OutboxRepository.Evento eventoValido() {

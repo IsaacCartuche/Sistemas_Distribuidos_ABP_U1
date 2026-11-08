@@ -41,11 +41,11 @@ public class RabbitPublicadorExpiracion implements PublicadorExpiracion {
         props.setDeliveryMode(MessageDeliveryMode.PERSISTENT);
         props.setMessageId(evento.eventId().toString());
         props.setCorrelationId(evento.correlationId().toString());
-        props.setType(ROUTING_KEY);
+        props.setType(evento.tipo());
         props.setPriority(10);
         Message mensaje = new Message(evento.mensaje().getBytes(StandardCharsets.UTF_8), props);
         try {
-            rabbit.send(EXCHANGE, ROUTING_KEY, mensaje, confirmacion);
+            rabbit.send(EXCHANGE, evento.tipo(), mensaje, confirmacion);
             CorrelationData.Confirm confirm = confirmacion.getFuture()
                     .get(propiedades.confirmTimeoutMs(), TimeUnit.MILLISECONDS);
             // Spring completa el returned message antes del future del confirm correlacionado.

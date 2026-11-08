@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.amqp.core.*;
 import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
@@ -109,6 +111,8 @@ class InboxReservasPostgresRabbitTest {
         var resultados = paralelos(2, i -> reintentar(evento(i == 0 ? uno : dos, "reserva.creada")).codigo());
         assertThat(resultados).containsExactlyInAnyOrder("ASIENTO_BLOQUEADO", "ASIENTO_NO_DISPONIBLE");
         assertThat(inventario.consultar(asiento(uno)).version()).isEqualTo(1);
+        assertThat(eventos(uno, "asiento.bloqueado") + eventos(dos, "asiento.bloqueado")).isEqualTo(1);
+        assertThat(eventos(uno, "asiento.no_disponible") + eventos(dos, "asiento.no_disponible")).isEqualTo(1);
     }
     @Test
     void mismoEventIdConcurrenteSoloRegistraUnaOperacion() throws Exception {
@@ -118,6 +122,7 @@ class InboxReservasPostgresRabbitTest {
         assertThat(resultados.stream().filter(ProcesadorReservas.Resultado::duplicado).count()).isEqualTo(3);
         assertThat(inbox(evento)).isEqualTo(1);
         assertThat(inventario.consultar(asiento(p)).version()).isEqualTo(1);
+        assertThat(eventos(p, "asiento.bloqueado")).isEqualTo(1);
     }
     @Test
     void mismoTokenConEventosDistintosNoRenuevaTtl() {
@@ -136,6 +141,7 @@ class InboxReservasPostgresRabbitTest {
         assertThat(resultados).containsOnly("ASIENTO_BLOQUEADO");
         assertThat(inventario.consultar(asiento(p)).version()).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from retenciones where token = ?", Integer.class, p.token())).isEqualTo(1);
+        assertThat(eventos(p, "asiento.bloqueado")).isEqualTo(1);
     }
     @Test
     void eventIdReutilizadoConOtrosDatosEsErrorPermanente() throws Exception {
@@ -158,6 +164,7 @@ class InboxReservasPostgresRabbitTest {
         assertThat(rabbit.receive(DLQ, 5000)).isNotNull();
         assertThat(inbox(evento)).isZero();
         assertThat(inventario.consultar(asiento(p)).estado()).isEqualTo(EstadoAsiento.DISPONIBLE);
+        assertThat(eventos(p, "asiento.no_disponible")).isZero();
     }
     @Test
     void cancelarRealYDuplicarNoVuelveATocarAsiento() throws Exception {
@@ -233,7 +240,7 @@ class InboxReservasPostgresRabbitTest {
         assertThat(procesar(evento(p, "reserva.cancelada")).codigo()).isEqualTo("IDENTIDAD_INCOHERENTE");
         reloj.avanzar(60);
         inventario.expirarUno(asiento(p));
-        assertThat(jdbc.queryForObject("select estado from inventario_outbox where token = ?", String.class, p.token())).isEqualTo("ESPERA_CONTEXTO");
+        assertThat(jdbc.queryForObject("select estado from inventario_outbox where token = ? and tipo = 'asiento.expirado'", String.class, p.token())).isEqualTo("ESPERA_CONTEXTO");
     }
     @Test
     void ttlVencidoNoSeRenuevaPorOtraCreacion() {
@@ -247,10 +254,12 @@ class InboxReservasPostgresRabbitTest {
     void expiracionTieneContextoAutenticoYPublicacionReal() throws Exception {
         Pedido p = pedido();
         procesar(evento(p, "reserva.creada"));
+        while (outbox.publicarUno()) { }
+        while (rabbit.receive("reservas.alta") != null) { }
         reloj.avanzar(60);
         inventario.expirarUno(asiento(p));
-        assertThat(jdbc.queryForObject("select estado from inventario_outbox where token = ?", String.class, p.token())).isEqualTo("PENDIENTE");
-        var json = mapper.readTree(jdbc.queryForObject("select mensaje from inventario_outbox where token = ?", String.class, p.token()));
+        assertThat(jdbc.queryForObject("select estado from inventario_outbox where token = ? and tipo = 'asiento.expirado'", String.class, p.token())).isEqualTo("PENDIENTE");
+        var json = mapper.readTree(jdbc.queryForObject("select mensaje from inventario_outbox where token = ? and tipo = 'asiento.expirado'", String.class, p.token()));
         assertThat(json.get("correlationId").asText()).isEqualTo(p.correlation().toString());
         assertThat(json.at("/payload/reservaId").asInt()).isEqualTo(p.reserva());
         assertThat(json.at("/payload/token").asText()).isEqualTo(p.token().toString());
@@ -266,7 +275,7 @@ class InboxReservasPostgresRabbitTest {
         reloj.avanzar(60);
         Pedido nuevo = otroMismoAsiento(viejo);
         assertThat(procesar(evento(nuevo, "reserva.creada")).codigo()).isEqualTo("ASIENTO_BLOQUEADO");
-        var json = mapper.readTree(jdbc.queryForObject("select mensaje from inventario_outbox where token = ?", String.class, viejo.token()));
+        var json = mapper.readTree(jdbc.queryForObject("select mensaje from inventario_outbox where token = ? and tipo = 'asiento.expirado'", String.class, viejo.token()));
         assertThat(json.at("/payload/reservaId").asInt()).isEqualTo(viejo.reserva());
         assertThat(json.get("correlationId").asText()).isEqualTo(viejo.correlation().toString());
         procesar(evento(viejo, "reserva.cancelada"));
@@ -280,19 +289,23 @@ class InboxReservasPostgresRabbitTest {
         new TransactionTemplate(tm).executeWithoutResult(status -> {
             procesar(evento);
             assertThat(inbox(evento)).isEqualTo(1);
+            assertThat(eventos(p, "asiento.bloqueado")).isEqualTo(1);
             status.setRollbackOnly();
         });
         assertThat(inbox(evento)).isZero();
+        assertThat(eventos(p, "asiento.bloqueado")).isZero();
         assertThat(inventario.consultar(asiento(p)).version()).isZero();
         assertThat(jdbc.queryForObject("select count(*) from inventario_solicitudes where token = ?", Integer.class, p.token())).isZero();
         assertThat(procesar(evento).codigo()).isEqualTo("ASIENTO_BLOQUEADO");
     }
-    @Test
-    void reentregaRealDespuesDeCommitSinAckEsIdempotente() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"reserva.creada", "asiento.confirmacion_solicitada"})
+    void reentregaRealDespuesDeCommitSinAckEsIdempotente(String tipo) throws Exception {
         var container = registry.getListenerContainer("inventario-reservas");
         container.stop();
         Pedido p = pedido();
-        ObjectNode evento = evento(p, "reserva.creada");
+        if (tipo.equals("asiento.confirmacion_solicitada")) procesar(evento(p, "reserva.creada"));
+        ObjectNode evento = evento(p, tipo);
         try {
             publicar(evento);
             rabbit.execute(channel -> {
@@ -310,7 +323,8 @@ class InboxReservasPostgresRabbitTest {
             });
         } finally { container.start(); }
         assertThat(inbox(evento)).isEqualTo(1);
-        assertThat(inventario.consultar(asiento(p)).version()).isEqualTo(1);
+        assertThat(inventario.consultar(asiento(p)).version()).isEqualTo(tipo.equals("reserva.creada") ? 1 : 2);
+        assertThat(eventos(p, tipo.equals("reserva.creada") ? "asiento.bloqueado" : "asiento.confirmado")).isEqualTo(1);
     }
     @Test
     void recuperaMensajePendienteAlReiniciarContenedorListener() throws Exception {
@@ -344,6 +358,243 @@ class InboxReservasPostgresRabbitTest {
         assertThat(inventario.consultar(asiento(p)).version()).isEqualTo(1);
     }
 
+    @Test
+    void bloqueoNuevoPublicaResultadoRealUnaSolaVez() throws Exception {
+        Pedido p = pedido();
+        ObjectNode creada = evento(p, "reserva.creada");
+        procesar(creada);
+        procesar(creada);
+        procesar(evento(p, "reserva.creada"));
+        assertThat(eventos(p, "asiento.bloqueado")).isEqualTo(1);
+        var recibido = publicarYRecibir(p, "asiento.bloqueado");
+        assertThat(recibido.get("correlationId").asText()).isEqualTo(p.correlation().toString());
+        assertThat(recibido.at("/payload/reservaId").asInt()).isEqualTo(p.reserva());
+        assertThat(recibido.at("/payload/asientoId").asInt()).isEqualTo(asiento(p));
+    }
+    @Test
+    void rechazoInexistenteNoRequiereRetencionNiInventaAsientoId() throws Exception {
+        Pedido inicial = pedido();
+        Pedido p = new Pedido(inicial.reserva(), inicial.vuelo(), "99Z", inicial.correlation(), inicial.token());
+        ObjectNode creada = evento(p, "reserva.creada");
+        assertThat(procesar(creada).codigo()).isEqualTo("ASIENTO_INEXISTENTE");
+        procesar(creada);
+        procesar(evento(p, "reserva.creada"));
+        assertThat(eventos(p, "asiento.no_disponible")).isEqualTo(1);
+        var recibido = publicarYRecibir(p, "asiento.no_disponible");
+        assertThat(recibido.at("/payload/asientoId").isNull()).isTrue();
+        assertThat(recibido.at("/payload/motivo").asText()).isEqualTo("ASIENTO_INEXISTENTE");
+        assertThat(jdbc.queryForObject("select count(*) from retenciones where token = ?", Integer.class, p.token())).isZero();
+    }
+    @Test
+    void ocupadoPublicaRechazoEstableSinDuplicarResultado() throws Exception {
+        Pedido propietario = pedido();
+        procesar(evento(propietario, "reserva.creada"));
+        Pedido p = otroMismoAsiento(propietario);
+        procesar(evento(p, "reserva.creada"));
+        procesar(evento(p, "reserva.creada"));
+        assertThat(eventos(p, "asiento.no_disponible")).isEqualTo(1);
+        assertThat(publicarYRecibir(p, "asiento.no_disponible").at("/payload/motivo").asText()).isEqualTo("ASIENTO_OCUPADO");
+    }
+    @Test
+    void confirmacionEntranteRealPersisteReservadoYPublicaConfirmado() throws Exception {
+        Pedido p = pedido();
+        procesar(evento(p, "reserva.creada"));
+        ObjectNode confirmar = evento(p, "asiento.confirmacion_solicitada");
+        publicar(confirmar);
+        esperarResultado(confirmar, "ASIENTO_CONFIRMADO");
+        assertThat(inventario.consultar(asiento(p)).estado()).isEqualTo(EstadoAsiento.RESERVADO);
+        assertThat(publicarYRecibir(p, "asiento.confirmado").at("/payload/token").asText()).isEqualTo(p.token().toString());
+    }
+    @Test
+    void confirmacionesDuplicadasNoCreanOtraTransicionNiOtroEvento() {
+        Pedido p = pedido();
+        procesar(evento(p, "reserva.creada"));
+        ObjectNode confirmar = evento(p, "asiento.confirmacion_solicitada");
+        assertThat(procesar(confirmar).codigo()).isEqualTo("ASIENTO_CONFIRMADO");
+        assertThat(procesar(confirmar).duplicado()).isTrue();
+        assertThat(procesar(evento(p, "asiento.confirmacion_solicitada")).codigo()).isEqualTo("YA_CONFIRMADA");
+        assertThat(eventos(p, "asiento.confirmado")).isEqualTo(1);
+        assertThat(inventario.consultar(asiento(p)).version()).isEqualTo(2);
+    }
+    @Test
+    void confirmacionesConcurrentesSoloReservanUnaVez() throws Exception {
+        Pedido p = pedido();
+        procesar(evento(p, "reserva.creada"));
+        var resultados = paralelos(4, i -> procesar(evento(p, "asiento.confirmacion_solicitada")).codigo());
+        assertThat(resultados.stream().filter("ASIENTO_CONFIRMADO"::equals).count()).isEqualTo(1);
+        assertThat(resultados.stream().filter("YA_CONFIRMADA"::equals).count()).isEqualTo(3);
+        assertThat(eventos(p, "asiento.confirmado")).isEqualTo(1);
+        assertThat(inventario.consultar(asiento(p)).version()).isEqualTo(2);
+    }
+    @Test
+    void creacionConIdIncoherenteEsSolicitudInvalidaSinBloquear() throws Exception {
+        Pedido p = pedido();
+        ObjectNode creada = evento(p, "reserva.creada");
+        ((ObjectNode) creada.get("payload")).put("asientoId", Integer.MAX_VALUE);
+        assertThat(procesar(creada).codigo()).isEqualTo("SOLICITUD_INVALIDA");
+        assertThat(inventario.consultar(asiento(p)).version()).isZero();
+        assertThat(publicarYRecibir(p, "asiento.no_disponible").at("/payload/motivo").asText()).isEqualTo("SOLICITUD_INVALIDA");
+    }
+    @Test
+    void tokenDeOtraReservaPublicaRechazoSinApropiarseDelAsiento() throws Exception {
+        Pedido p = pedido();
+        procesar(evento(p, "reserva.creada"));
+        Pedido ajena = new Pedido(IDS.incrementAndGet(), p.vuelo(), p.asiento(), UUID.randomUUID(), p.token());
+        assertThat(procesar(evento(ajena, "reserva.creada")).codigo()).isEqualTo("TOKEN_DE_OTRA_RESERVA");
+        assertThat(publicarYRecibir(ajena, "asiento.no_disponible").at("/payload/motivo").asText()).isEqualTo("TOKEN_DE_OTRA_RESERVA");
+        assertThat(inventario.consultar(asiento(p)).version()).isEqualTo(1);
+    }
+    @Test
+    void confirmacionTrasTtlMaterializaExpiracionYRechazoAtomicos() throws Exception {
+        Pedido p = pedido();
+        procesar(evento(p, "reserva.creada"));
+        reloj.avanzar(60);
+        ObjectNode confirmar = evento(p, "asiento.confirmacion_solicitada");
+        assertThat(procesar(confirmar).codigo()).isEqualTo("RETENCION_EXPIRADA");
+        procesar(confirmar);
+        procesar(evento(p, "asiento.confirmacion_solicitada"));
+        assertThat(eventos(p, "asiento.expirado")).isEqualTo(1);
+        assertThat(eventos(p, "asiento.confirmacion_rechazada")).isEqualTo(1);
+        assertThat(eventos(p, "asiento.confirmado")).isZero();
+        assertThat(inventario.consultar(asiento(p)).estado()).isEqualTo(EstadoAsiento.DISPONIBLE);
+        assertThat(publicarYRecibir(p, "asiento.confirmacion_rechazada").at("/payload/motivo").asText()).isEqualTo("RETENCION_EXPIRADA");
+    }
+    @Test
+    void tokenIncorrectoRechazaSinModificarLaRetencionCorrecta() throws Exception {
+        Pedido original = pedido();
+        procesar(evento(original, "reserva.creada"));
+        Pedido falso = new Pedido(original.reserva(), original.vuelo(), original.asiento(), original.correlation(), UUID.randomUUID());
+        assertThat(procesar(evento(falso, "asiento.confirmacion_solicitada")).codigo()).isEqualTo("TOKEN_INVALIDO");
+        assertThat(inventario.consultar(asiento(original)).version()).isEqualTo(1);
+        assertThat(publicarYRecibir(falso, "asiento.confirmacion_rechazada").at("/payload/motivo").asText()).isEqualTo("TOKEN_INVALIDO");
+    }
+    @Test
+    void otraReservaOCorrelacionNoPuedenConfirmar() {
+        Pedido p = pedido();
+        procesar(evento(p, "reserva.creada"));
+        Pedido ajena = new Pedido(IDS.incrementAndGet(), p.vuelo(), p.asiento(), UUID.randomUUID(), p.token());
+        assertThat(procesar(evento(ajena, "asiento.confirmacion_solicitada")).codigo()).isEqualTo("RESERVA_NO_COINCIDE");
+        Pedido correlacion = new Pedido(p.reserva(), p.vuelo(), p.asiento(), UUID.randomUUID(), p.token());
+        assertThat(procesar(evento(correlacion, "asiento.confirmacion_solicitada")).codigo()).isEqualTo("RESERVA_NO_COINCIDE");
+        assertThat(inventario.consultar(asiento(p)).estado()).isEqualTo(EstadoAsiento.BLOQUEADO);
+        assertThat(eventos(p, "asiento.confirmado")).isZero();
+    }
+    @Test
+    void confirmacionConIdDeOtroAsientoEsRechazoDeNegocio() {
+        Pedido p = pedido();
+        procesar(evento(p, "reserva.creada"));
+        ObjectNode confirmar = evento(p, "asiento.confirmacion_solicitada");
+        ((ObjectNode) confirmar.get("payload")).put("asientoId", Integer.MAX_VALUE);
+        assertThat(procesar(confirmar).codigo()).isEqualTo("RESERVA_NO_COINCIDE");
+        assertThat(inventario.consultar(asiento(p)).version()).isEqualTo(1);
+    }
+    @Test
+    void confirmacionAntesDeCreacionNoBloqueaNiConfirmaImplicitamente() throws Exception {
+        Pedido p = pedido();
+        ObjectNode confirmar = evento(p, "asiento.confirmacion_solicitada");
+        assertThat(procesar(confirmar).codigo()).isEqualTo("RETENCION_INEXISTENTE");
+        assertThat(inventario.consultar(asiento(p)).version()).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from inventario_solicitudes where token = ?", Integer.class, p.token())).isZero();
+        assertThat(publicarYRecibir(p, "asiento.confirmacion_rechazada").at("/payload/motivo").asText()).isEqualTo("RETENCION_INEXISTENTE");
+        procesar(evento(p, "reserva.creada"));
+        assertThat(procesar(confirmar).duplicado()).isTrue(); // Reentrega antigua conserva el rechazo original.
+        assertThat(inventario.consultar(asiento(p)).estado()).isEqualTo(EstadoAsiento.BLOQUEADO);
+    }
+    @Test
+    void confirmacionSimultaneaConExpiracionNoPublicaExitoFalso() throws Exception {
+        Pedido p = pedido();
+        procesar(evento(p, "reserva.creada"));
+        reloj.avanzar(60);
+        ObjectNode confirmar = evento(p, "asiento.confirmacion_solicitada");
+        paralelos(2, i -> {
+            if (i == 0) {
+                for (int n = 0; n < 3; n++) {
+                    try { inventario.expirarUno(asiento(p)); break; }
+                    catch (OptimisticLockingFailureException e) { if (n == 2) throw e; }
+                }
+            } else reintentar(confirmar);
+            return true;
+        });
+        assertThat(inventario.consultar(asiento(p)).estado()).isEqualTo(EstadoAsiento.DISPONIBLE);
+        assertThat(eventos(p, "asiento.expirado")).isEqualTo(1);
+        assertThat(eventos(p, "asiento.confirmado")).isZero();
+        assertThat(eventos(p, "asiento.confirmacion_rechazada")).isEqualTo(1);
+    }
+    @Test
+    void confirmacionJustoAntesDelTtlNoEsLiberadaPorSchedulerOCancelacion() {
+        Pedido p = pedido();
+        procesar(evento(p, "reserva.creada"));
+        reloj.avanzar(59);
+        procesar(evento(p, "asiento.confirmacion_solicitada"));
+        reloj.avanzar(2);
+        inventario.expirarUno(asiento(p));
+        assertThat(procesar(evento(p, "reserva.cancelada")).codigo()).isEqualTo("RESERVADO_NO_LIBERADO");
+        assertThat(procesar(evento(p, "asiento.confirmacion_solicitada")).codigo()).isEqualTo("YA_CONFIRMADA");
+        assertThat(inventario.consultar(asiento(p)).estado()).isEqualTo(EstadoAsiento.RESERVADO);
+        assertThat(eventos(p, "asiento.expirado")).isZero();
+        assertThat(eventos(p, "asiento.confirmado")).isEqualTo(1);
+    }
+    @Test
+    void rollbackDeConfirmacionRevierteInboxOutboxYReserva() {
+        Pedido p = pedido();
+        procesar(evento(p, "reserva.creada"));
+        ObjectNode confirmar = evento(p, "asiento.confirmacion_solicitada");
+        new TransactionTemplate(tm).executeWithoutResult(status -> {
+            procesar(confirmar);
+            assertThat(eventos(p, "asiento.confirmado")).isEqualTo(1);
+            status.setRollbackOnly();
+        });
+        assertThat(inbox(confirmar)).isZero();
+        assertThat(eventos(p, "asiento.confirmado")).isZero();
+        assertThat(inventario.consultar(asiento(p)).estado()).isEqualTo(EstadoAsiento.BLOQUEADO);
+        procesar(confirmar);
+        assertThat(eventos(p, "asiento.confirmado")).isEqualTo(1);
+    }
+    @Test
+    void confirmacionMalformadaVaADlqSinResultadoDeNegocio() {
+        Pedido p = pedido();
+        procesar(evento(p, "reserva.creada"));
+        ObjectNode confirmar = evento(p, "asiento.confirmacion_solicitada");
+        ((ObjectNode) confirmar.get("payload")).remove("asientoId");
+        publicar(confirmar);
+        assertThat(rabbit.receive(DLQ, 5000)).isNotNull();
+        assertThat(inbox(confirmar)).isZero();
+        assertThat(eventos(p, "asiento.confirmacion_rechazada")).isZero();
+        assertThat(inventario.consultar(asiento(p)).version()).isEqualTo(1);
+    }
+    @Test
+    void nuevoResultadoSinDestinoSeRecuperaConMismoId() throws Exception {
+        Pedido p = pedido();
+        procesar(evento(p, "reserva.creada"));
+        var admin = new RabbitAdmin(factory);
+        var binding = BindingBuilder.bind(new Queue("reservas.alta", true)).to(new TopicExchange("vuelos.events")).with("asiento.bloqueado");
+        UUID id = jdbc.queryForObject("select event_id from inventario_outbox where token = ? and tipo = 'asiento.bloqueado'", UUID.class, p.token());
+        String original = jdbc.queryForObject("select mensaje from inventario_outbox where event_id = ?", String.class, id);
+        admin.removeBinding(binding);
+        try {
+            assertThat(outbox.publicarUno()).isTrue();
+            assertThat(jdbc.queryForObject("select estado from inventario_outbox where event_id = ?", String.class, id)).isEqualTo("PENDIENTE");
+            assertThat(jdbc.queryForObject("select ultimo_error from inventario_outbox where event_id = ?", String.class, id)).isEqualTo("SIN_DESTINO");
+        } finally { admin.declareBinding(binding); }
+        jdbc.update("update inventario_outbox set siguiente_intento = CURRENT_TIMESTAMP where event_id = ?", id);
+        var recibido = publicarYRecibir(p, "asiento.bloqueado");
+        assertThat(recibido.get("eventId").asText()).isEqualTo(id.toString());
+        assertThat(recibido).isEqualTo(mapper.readTree(original));
+    }
+
+    private int eventos(Pedido p, String tipo) {
+        return jdbc.queryForObject("select count(*) from inventario_outbox where token = ? and tipo = ?", Integer.class, p.token(), tipo);
+    }
+    private com.fasterxml.jackson.databind.JsonNode publicarYRecibir(Pedido p, String tipo) throws Exception {
+        while (outbox.publicarUno()) { }
+        Message mensaje;
+        while ((mensaje = rabbit.receive("reservas.alta", 100)) != null) {
+            var json = mapper.readTree(mensaje.getBody());
+            if (tipo.equals(json.get("tipo").asText()) && p.token().toString().equals(json.at("/payload/token").asText())) return json;
+        }
+        throw new AssertionError("No llegó resultado " + tipo);
+    }
+
     private Pedido pedido() {
         int vuelo = IDS.incrementAndGet();
         inventario.inicializar(vuelo, new InicializarRequest(List.of("12A", "12B")));
@@ -360,6 +611,7 @@ class InboxReservasPostgresRabbitTest {
         var payload = json.putObject("payload");
         payload.put("reservaId", p.reserva()); payload.put("vueloId", p.vuelo());
         payload.put("asiento", p.asiento()); payload.put("token", p.token().toString());
+        if (tipo.equals("asiento.confirmacion_solicitada")) payload.put("asientoId", asiento(p));
         return json;
     }
     private ProcesadorReservas.Resultado procesar(ObjectNode json) {
@@ -424,8 +676,13 @@ class InboxReservasPostgresRabbitTest {
             return new Declarables(exchange, dlx, entrada, dlq, reservas,
                     BindingBuilder.bind(entrada).to(exchange).with("reserva.creada"),
                     BindingBuilder.bind(entrada).to(exchange).with("reserva.cancelada"),
+                    BindingBuilder.bind(entrada).to(exchange).with("asiento.confirmacion_solicitada"),
                     BindingBuilder.bind(dlq).to(dlx).with("inventario.dlq"),
-                    BindingBuilder.bind(reservas).to(exchange).with("asiento.expirado"));
+                    BindingBuilder.bind(reservas).to(exchange).with("asiento.expirado"),
+                    BindingBuilder.bind(reservas).to(exchange).with("asiento.bloqueado"),
+                    BindingBuilder.bind(reservas).to(exchange).with("asiento.no_disponible"),
+                    BindingBuilder.bind(reservas).to(exchange).with("asiento.confirmado"),
+                    BindingBuilder.bind(reservas).to(exchange).with("asiento.confirmacion_rechazada"));
         }
     }
 }

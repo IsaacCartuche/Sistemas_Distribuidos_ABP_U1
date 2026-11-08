@@ -26,11 +26,11 @@ public class ContextoOutbox {
             throw new IllegalArgumentException("Se requieren identificadores reales de evento, reserva y correlación");
         }
         var mensajes = jdbc.query("""
-                select mensaje, token, correlation_id from inventario_outbox
+                select mensaje, token, correlation_id, tipo from inventario_outbox
                 where event_id = ? and estado = 'ESPERA_CONTEXTO'
                 for update
                 """, (rs, n) -> new OutboxRepository.Evento(eventId, rs.getObject("correlation_id", UUID.class),
-                rs.getObject("token", UUID.class), rs.getString("mensaje"), 0), eventId);
+                rs.getObject("token", UUID.class), rs.getString("mensaje"), 0, rs.getString("tipo")), eventId);
         if (mensajes.isEmpty()) return false;
         try {
             OutboxRepository.Evento fila = mensajes.get(0);
