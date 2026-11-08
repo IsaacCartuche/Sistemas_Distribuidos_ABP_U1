@@ -73,7 +73,7 @@ class ReservaServiceTest {
                 when(repository.findByIdempotencyKey("reserva-001"))
                                 .thenReturn(Optional.empty());
 
-                when(persistenceService.guardar(any(Reserva.class)))
+                when(persistenceService.guardarConEvento(any(Reserva.class)))
                                 .thenAnswer(invocation -> invocation.getArgument(0));
 
                 Reserva resultado = service.crearReserva(request);
@@ -98,7 +98,7 @@ class ReservaServiceTest {
 
                 ArgumentCaptor<Reserva> captor = ArgumentCaptor.forClass(Reserva.class);
 
-                verify(persistenceService).guardar(captor.capture());
+                verify(persistenceService).guardarConEvento(captor.capture());
 
                 assertSame(resultado, captor.getValue());
         }
@@ -187,7 +187,7 @@ class ReservaServiceTest {
                                 .thenReturn(Optional.empty(), Optional.of(existente));
 
                 // Simulamos que otra solicitud guardó primero.
-                when(persistenceService.guardar(any(Reserva.class)))
+                when(persistenceService.guardarConEvento(any(Reserva.class)))
                                 .thenThrow(new DataIntegrityViolationException(
                                                 "Clave de idempotencia duplicada"));
 
@@ -205,7 +205,7 @@ class ReservaServiceTest {
 
                 assertSame(existente, resultado);
 
-                verify(persistenceService).guardar(any(Reserva.class));
+                verify(persistenceService).guardarConEvento(any(Reserva.class));
 
                 verify(repository, times(2))
                                 .findByIdempotencyKey("reserva-concurrente-001");

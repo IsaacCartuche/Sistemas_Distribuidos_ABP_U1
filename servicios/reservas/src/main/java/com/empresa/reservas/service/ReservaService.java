@@ -90,7 +90,7 @@ public class ReservaService {
         reserva.setToken(UUID.randomUUID());
 
         try {
-            return persistenceService.guardar(reserva);
+            return persistenceService.guardarConEvento(reserva);
 
         } catch (DataIntegrityViolationException ex) {
 
