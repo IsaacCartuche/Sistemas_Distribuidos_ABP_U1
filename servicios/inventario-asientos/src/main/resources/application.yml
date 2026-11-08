@@ -27,6 +27,9 @@ inventario:
   ttl-segundos: ${INVENTARIO_TTL_SEGUNDOS:300}
   expiracion-habilitada: ${INVENTARIO_EXPIRACION_HABILITADA:true}
   intervalo-expiracion-ms: ${INVENTARIO_INTERVALO_EXPIRACION_MS:10000}
+  consumidor:
+    # Contrato provisional: activar únicamente tras validar con Sebastián y preparar topología/DLQ.
+    habilitado: ${INVENTARIO_CONSUMIDOR_HABILITADO:false}
   outbox:
     habilitada: ${INVENTARIO_OUTBOX_HABILITADA:true}
     intervalo-ms: ${INVENTARIO_OUTBOX_INTERVALO_MS:5000}

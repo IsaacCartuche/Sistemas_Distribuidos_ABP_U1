@@ -17,11 +17,15 @@ public class OutboxRepository {
     public record Evento(UUID eventId, UUID correlationId, UUID token, String mensaje, int intentos) { }
 
     public void registrar(UUID eventId, UUID token, String mensaje) {
+        registrar(eventId, token, mensaje, null);
+    }
+
+    public void registrar(UUID eventId, UUID token, String mensaje, UUID correlationId) {
         jdbc.update("""
-                insert into inventario_outbox(event_id, token, tipo, mensaje)
-                values (?, ?, 'asiento.expirado', ?)
+                insert into inventario_outbox(event_id, token, tipo, mensaje, correlation_id, estado)
+                values (?, ?, 'asiento.expirado', ?, ?, ?)
                 on conflict (tipo, token) do nothing
-                """, eventId, token, mensaje);
+                """, eventId, token, mensaje, correlationId, correlationId == null ? "ESPERA_CONTEXTO" : "PENDIENTE");
     }
 
     public Optional<Evento> reclamarPendiente() {

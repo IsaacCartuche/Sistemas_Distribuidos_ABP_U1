@@ -2,8 +2,8 @@
 
 Núcleo REST de disponibilidad, retenciones temporales y confirmación de asientos.
 Java **17**, Spring Boot **3.2.0**, JPA y PostgreSQL independiente **`db_inventario`**.
-Puerto HTTP **8085**. Sin interfaz gráfica. Publicación fiable de `asiento.expirado` mediante outbox;
-consumidores RabbitMQ y Saga corresponden a una fase posterior.
+Puerto HTTP **8085**. Sin interfaz gráfica. Publicación fiable de `asiento.expirado` mediante outbox
+y consumidor provisional de Reservas con Inbox, **deshabilitado por defecto** hasta acordar el contrato.
 
 ## Responsabilidades y estructura
 
@@ -18,6 +18,7 @@ com.empresa.inventario
 ├── application   # Transacciones, retenciones y expiración programada
 ├── config        # Clock UTC, configuración validada y scheduling
 ├── domain        # Asiento, Retencion y estados
+├── inbox         # Contrato provisional, Inbox, asociación de reserva y listener optativo
 ├── persistence   # Repositorios JPA y alta idempotente de asientos
 └── outbox        # Registro transaccional, contexto pendiente, workers y Spring AMQP
 ```
@@ -60,6 +61,10 @@ entre instancias y `INSERT ... ON CONFLICT DO NOTHING` permite inicializaciones 
   desplegar el publicador actualizado. Amplía atómicamente el CHECK de estados para admitir
   `ERROR_DATOS`; no modifica filas, PK, FK, índices ni los demás CHECKs. No ejecuta reparaciones
   de mensajes. En una instalación nueva `init.sql` ya incluye el estado adicional.
+- Para la fase Inbox aplicar después **`sql/migracion-inbox-reservas.sql`**, antes de desplegar el
+  código actualizado, incluso si el listener permanece apagado: la expiración consulta la asociación
+  local para obtener su contexto. Solo añade dos tablas, sin modificar filas, entidades de retención
+  ni tablas anteriores. `init.sql` incluye todo para nuevas instalaciones. No se ejecutó en bases existentes.
 - Hibernate usa **`ddl-auto=validate`**: no crea ni modifica tablas. La aplicación no ejecuta
   automáticamente ninguno de estos scripts. La migración no se ha aplicado a bases existentes.
 
@@ -166,7 +171,7 @@ curl -i -X POST "$BASE/asientos/1/bloqueos/$TOKEN/confirmacion"
 | `INVENTARIO_INTERVALO_EXPIRACION_MS` | 10000 | Demora entre ciclos, mínimo 100 ms |
 | `INVENTARIO_EXPIRACION_HABILITADA` | true | Activa limpieza programada |
 
-Las variables RabbitMQ existentes configuran el publicador; no hay consumidores de negocio.
+Las variables RabbitMQ existentes configuran publicador y listener; este último es optativo y apagado por defecto.
 El broker no interviene en las transacciones REST: su indisponibilidad deja publicaciones pendientes.
 Maven no carga `.env` automáticamente. Desde esta carpeta:
 
@@ -247,7 +252,7 @@ integración; no se midió el temporizador de scheduling en tiempo de pared ni v
 
 ### Contexto de reserva: limitación explícita acordada para esta fase
 
-Las retenciones actuales solo conocen token y asiento. **No se conoce `reservaId` ni `correlationId`**.
+Las retenciones manuales REST solo conocen token y asiento. **No se conoce su `reservaId` ni `correlationId`**.
 No se deduce uno del otro, no se usa el token como reserva y no se generan identificadores ficticios.
 Se eligió conservar estos eventos en **ESPERA_CONTEXTO**, sin enviarlos a RabbitMQ.
 
@@ -267,6 +272,12 @@ reservas externas: su procedencia/asociación se debe resolver con Sebastián an
 En las pruebas reales se completa con **datos explícitos de fixtures**, no con información inventada
 para las retenciones de desarrollo. Por eso las pruebas demuestran el transporte del contrato completo,
 pero **las expiraciones REST actuales quedan retenidas hasta resolver el contexto de reserva**.
+
+Las retenciones obtenidas por el consumidor provisional sí tienen una asociación durable recibida del
+mensaje validado en `inventario_solicitudes`. Su expiración consulta esa asociación e inserta directamente
+el evento completo en PENDIENTE en la misma transacción; no necesita completar contexto posteriormente.
+Solo se utiliza una asociación que obtuvo realmente la retención para ese asiento. Conocer un token REST
+preexistente no permite apropiarse de él ni convertirlo en una reserva asociada.
 
 ### Tabla inventario_outbox
 
@@ -355,7 +366,7 @@ La prueba aislada verifica que el binding específico de notificación no recibe
 | `INVENTARIO_OUTBOX_CONFIRM_TIMEOUT_MS` | 5000 | Espera del confirm entre 100 y 30000 ms |
 | `INVENTARIO_OUTBOX_REINTENTO_SEGUNDOS` | 5 | Base del backoff, entre 1 y 300 segundos |
 
-No hay DLQ de esta fase porque todavía no hay consumidores. Los fallos temporales de publicación se
+El publicador outbox no utiliza DLQ. Sus fallos temporales de publicación se
 conservan PENDIENTE y se reintentan; los errores de datos se conservan ERROR_DATOS sin reintento.
 La consulta de esos estados y ESPERA_CONTEXTO permite detectar problemas diferenciados sin borrar eventos.
 
@@ -441,6 +452,175 @@ en ESPERA_CONTEXTO, PENDIENTE y ENVIADO; verifica que filas, estados previos y m
 No se aplicó ninguna migración sobre la base existente del proyecto. La inicialización nueva y el
 empaquetado del JAR también se comprobaron; reportes en `target/surefire-reports/`.
 
+## Consumo provisional de Reservas con Inbox
+
+### Inspección y decisiones pendientes
+
+Se inspeccionaron las referencias remotas disponibles con `git show`/`git grep`, sin cambiar de rama.
+`origin/sebastian` contiene el esqueleto de Reservas/Pagos y SQL de reservas con ID SERIAL, pero no
+publicadores ni payloads documentados para estos eventos o `asiento.no_disponible`. Tampoco se halló
+un contrato en los directorios de documentación revisados de las otras referencias accesibles.
+
+`origin/isaac:infra/rabbitmq/definitions.json` sí contempla `inventario.entrada` con bindings
+`reserva.creada` y `reserva.cancelada`, a diferencia del archivo local inválido. El broker existente
+no mostró esas colas/bindings en el vhost `/` durante la inspección. No se hizo fetch, así que se informa
+solo sobre las referencias que ya estaban disponibles localmente, no sobre cambios remotos no descargados.
+
+Se implementó el siguiente **contrato provisional para pruebas**, no un acuerdo final de equipo:
+
+```json
+{
+  "eventId": "10000000-0000-0000-0000-000000000001",
+  "correlationId": "20000000-0000-0000-0000-000000000001",
+  "timestamp": "2026-11-07T21:00:00Z",
+  "tipo": "reserva.creada",
+  "payload": {
+    "reservaId": 123,
+    "vueloId": 1,
+    "asiento": "12B",
+    "token": "30000000-0000-0000-0000-000000000001"
+  }
+}
+```
+
+La cancelación requiere los mismos identificadores y `tipo: reserva.cancelada`. No se equiparan reserva,
+correlación y token. Se acepta reserva numérica positiva o cadena no vacía mientras se acuerda su tipo;
+`123` y `"123"` se conservan como identidades distintas. El número de asiento debe coincidir exactamente
+con el almacenado (la API de inicialización normaliza a mayúsculas). JSON, UUID, tipos, timestamp y campos
+son obligatorios; se rechazan duplicados de claves y discrepancias entre routing key y `tipo`.
+
+Política conservadora provisional: **una reserva se asocia a un solo asiento, token y correlación**.
+Los identificadores no pueden reasignarse con otro mensaje. Cambios de asiento, varios asientos por
+reserva o una nueva retención para una reserva cancelada requieren acordar otro protocolo; actualmente
+se rechazan y nunca provocan una liberación/bloqueo inesperado.
+
+### Arquitectura y transacción
+
+```text
+inventario.entrada → ReservasListener → validación estricta → ProcesadorReservas (@Transactional)
+  → INSERT Inbox con clave única
+  → asociación durable / marca de cancelación
+  → InventarioService.bloquear o liberar (misma transacción)
+  → resultado Inbox → COMMIT → retorno listener → ACK automático del contenedor
+```
+
+El consumidor no publica directamente a RabbitMQ. El único evento de salida añadido al flujo es la
+expiración mediante la outbox existente. `asiento.bloqueado` y `asiento.no_disponible` **no se publican**:
+sus payloads y destinatarios/resultados siguen pendientes de Sebastián. El resultado local no sustituye
+esa respuesta distribuida; por eso esta implementación no constituye todavía una Saga operativa completa.
+
+### Tablas nuevas
+
+**`inventario_inbox`**: clave primaria `(consumidor, event_id)`, tipo, huella SHA-256 de los campos
+conocidos normalizados del evento, resultado y fechas de recepción/procesamiento. El consumidor lógico
+es `inventario.reservas.v1`, idéntico para todas sus instancias. `INSERT ... ON CONFLICT DO NOTHING`
+resuelve duplicados simultáneos; no es una comprobación previa sin protección. Si otra transacción
+confirma primero, se compara su huella y se devuelve el resultado. Reutilizar eventId con otros datos
+es error permanente. No se confunde la huella con firma/autenticación del emisor.
+
+La inserción, resultado, asociación y cambios JPA se confirman juntos. Un fallo revierte también la Inbox.
+No se guarda una fila completada antes de conocer el resultado. Perder el ACK después del commit provoca
+una reentrega que encuentra el registro y no renueva TTL ni repite acciones. No se purga la Inbox.
+
+**`inventario_solicitudes`**: clave de reserva como JSON escalar canónico, correlación, token globalmente
+único, vuelo/número, asiento interno nullable, estado y fecha. Conserva las asociaciones y cancelaciones
+anticipadas aunque todavía no exista una retención o el mapa del vuelo. No tiene FK hacia retenciones
+porque la cancelación puede llegar primero; sí tiene FK nullable al asiento. La retención y sus estados
+originales no se modificaron estructuralmente.
+
+Solo se bloquea la fila de asociación con `FOR UPDATE` para serializar mensajes de la misma reserva.
+Las reservas diferentes siguen compitiendo por el asiento mediante **@Version**, sin lock pesimista de
+asientos. La expiración solo lee la asociación y mantiene sus propias reglas optimistas.
+
+### Resultados y mensajes desordenados
+
+| Caso | Resultado y efecto |
+|------|--------------------|
+| Creación con asiento libre | ASIENTO_BLOQUEADO; TTL del servicio y asociación durable |
+| Asiento ocupado | ASIENTO_NO_DISPONIBLE; resultado confirmado, sin reintentos infinitos |
+| Asiento inexistente | ASIENTO_INEXISTENTE; solicitud rechazada, no crea asientos |
+| Mismo eventId y contenido | Devuelve resultado guardado, sin efectos |
+| Mismo token con otro eventId, misma asociación vigente | Idempotencia del servicio, sin renovar TTL |
+| Token liberado/expirado | RETENCION_TERMINAL; no se reactiva |
+| Token ya confirmado | YA_CONFIRMADA; no se vuelve a bloquear |
+| Token de otra reserva o asociación alterada | Rechazo local sin cambiar el asiento |
+| Token REST sin asociación previa | No se adopta ni libera por conocerlo |
+| Cancelación de retención propia | Reutiliza liberar; los reintentos no vuelven a tocar el asiento |
+| Cancelación antes de creación | Marca CANCELADA durable; creación retrasada no bloquea |
+| Cancelación antigua tras otro bloqueo | Usa el token antiguo; no libera el nuevo |
+| Cancelación de confirmada | RESERVADO_NO_LIBERADO; conserva reserva y registra cancelación pendiente de compensación |
+
+Las solicitudes rechazadas no se reactivan automáticamente cuando cambia la disponibilidad o se crea
+el mapa después. Ese tratamiento de reintentos de negocio debe acordarse con Reservas. Una cancelación
+sí puede quedar registrada para impedir cualquier creación tardía de la misma identidad.
+
+### Activación y errores
+
+`INVENTARIO_CONSUMIDOR_HABILITADO=false` es el valor predeterminado. En ese estado ni el listener ni su
+container factory específicos se crean. No se declara topología compartida desde la aplicación. Antes
+de activar se necesitan contrato validado, migración aplicada, permisos de acceso y una DLQ verificada.
+
+La factory usa AUTO ACK **después** del retorno exitoso del procesador transaccional, prefetch 1 y
+`defaultRequeueRejected=false`. Errores permanentes de mensaje no se reintentan; fallos temporales,
+incluidos conflictos optimistas o fallos PostgreSQL, tienen hasta **3 intentos totales**, cada uno con
+transacción nueva y espera de 100/200 ms. Agotados los intentos se rechaza sin requeue. Los resultados
+de negocio esperados se guardan y ACKean, no se convierten en errores técnicos.
+
+La DLQ depende de los argumentos/políticas del broker. **Sin dead-lettering correcto, un rechazo podría
+descartarse**; no habilitar hasta verificarlo con Isaac. En su referencia se usa `vuelos.dlx`, distinto
+del DLX constitucional `dlq.reservas`, y los bindings DLQ mostrados no enlazan ese DLX a una cola de
+Inventario: debe acordarse/corregirse por su responsable. Tampoco deben copiarse tokens a Notificaciones:
+esa referencia enlaza `reserva.creada/cancelada` con `notificaciones.entrada`, por lo que el payload
+propuesto requiere revisar su proyección pública antes del despliegue.
+
+El límite de intentos no sustituye timeouts de red JDBC. En la prueba de PostgreSQL caído se usan
+`socketTimeout`/`connectTimeout` explícitos solo en la URL temporal; conviene acordar sus valores para
+el despliegue. No se alteró la URL existente de la base del proyecto.
+
+### Pruebas de consumo
+
+`bash scripts/test-outbox.sh` también ejecuta la nueva suite de Inbox. Crea otra base **temporal**
+`db_inventario_inbox` para aislarla de las suites anteriores; las demás siguen usando `db_inventario`.
+La topología de prueba se declara solo en RabbitMQ temporal e incluye una DLQ funcional. La prueba de
+fallo PostgreSQL pausa/reanuda exclusivamente el contenedor cuyo ID y etiqueta de integración se verifican.
+Nunca se pausan ni detienen los contenedores existentes del proyecto.
+
+Se comprueban recepción RabbitMQ, Inbox y asociación, ocupación concurrente, duplicados simultáneos,
+tokens reutilizados, cancelaciones cruzadas/anticipadas, confirmadas protegidas, expiración con contexto,
+publicación real de ese contexto, rollback conjunto, reentrega real después de commit sin ACK,
+rearranque del container listener y recuperación/reproceso desde DLQ tras indisponibilidad PostgreSQL.
+El rearranque probado es del listener, no de toda la JVM. La migración se aplica dos veces en la base
+temporal de migraciones y verifica que no modifica los datos anteriores.
+
+### Resultado comprobado de esta fase
+
+Ejecución final: **`bash scripts/test-outbox.sh` → `mvn verify` → BUILD SUCCESS**.
+Java **17.0.20.1**, Maven **3.9.12**, Spring Boot **3.2.0**, PostgreSQL **15.19** y RabbitMQ **3.13.7**.
+
+| Suite | Aprobadas | Fallos | Errores | Omitidas |
+|-------|-----------|--------|---------|----------|
+| InventarioControllerTest | 29 | 0 | 0 | 0 |
+| InventarioServiceTest | 20 | 0 | 0 | 0 |
+| OutboxWorkerTest | 5 | 0 | 0 | 0 |
+| RabbitPublicadorExpiracionTest | 67 | 0 | 0 | 0 |
+| InventarioPostgresTest | 21 | 0 | 0 | 0 |
+| OutboxRabbitPostgresTest | 20 | 0 | 0 | 0 |
+| ValidadorReservaTest | 40 | 0 | 0 | 0 |
+| ReservasListenerTest | 2 | 0 | 0 | 0 |
+| ConsumidorDeshabilitadoTest | 1 | 0 | 0 | 0 |
+| InboxReservasPostgresRabbitTest | 23 | 0 | 0 | 0 |
+| **Total** | **228** | **0** | **0** | **0** |
+
+Los 64 casos de integración usan PostgreSQL y, en las suites AMQP, RabbitMQ reales; los demás comprueban servicio, REST,
+validación, listener y configuración. Las trazas de conexión rota y rechazo sin requeue son esperadas
+en las pruebas de indisponibilidad y mensajes inválidos; no representan fallos de la suite.
+La prueba de pérdida de ACK confirma primero el negocio y fuerza una reentrega real mediante NACK/requeue
+en el cliente de prueba, comprobando la marca redelivered y un solo cambio persistido.
+El JAR se empaquetó correctamente. Reportes: `target/surefire-reports/`.
+
+No se aplicaron migraciones ni mensajes sobre el entorno existente del equipo. El listener está probado
+en aislamiento, pero **no está habilitado en la configuración por defecto ni integrado con Reservas real**.
+
 ## Integraciones pendientes
 
 - Acordar con Vuelos cómo validar existencia y autorizar la inicialización del mapa de asientos,
@@ -451,8 +631,8 @@ empaquetado del JAR también se comprobaron; reportes en `target/surefire-report
   incluida su persistencia antes de la expiración y el tratamiento de eventos ESPERA_CONTEXTO.
 - Con Isaac: instalar/verificar exchange topic durable, cola durable `reservas.alta` y binding exacto
   `asiento.expirado`, sin propagar tokens a colas de notificación. No se corrigieron archivos compartidos.
-- RabbitMQ/Saga: consumidores definitivos y los demás eventos (`asiento.bloqueado`, `asiento.liberado`,
-  `asiento.no_disponible`) permanecen fuera de esta fase.
+- RabbitMQ/Saga: validar y habilitar el consumidor provisional; acordar los demás eventos
+  (`asiento.bloqueado`, `asiento.liberado`, `asiento.no_disponible`) y el protocolo final de confirmación.
 - La cancelación de un asiento ya RESERVADO necesita un contrato específico de compensación;
   no se habilita mediante una liberación de retención duplicada.
 - Autenticación/autorización del gateway y exposición de operaciones de administración pendientes.

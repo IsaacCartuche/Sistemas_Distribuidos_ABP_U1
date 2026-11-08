@@ -6,9 +6,11 @@ import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 public interface AsientoRepository extends JpaRepository<Asiento, Integer> {
     List<Asiento> findByVueloIdOrderByNumeroAsiento(Integer vueloId);
+    Optional<Asiento> findByVueloIdAndNumeroAsiento(Integer vueloId, String numeroAsiento);
 
     @Query("""
             select a from Asiento a where a.vueloId = :vuelo

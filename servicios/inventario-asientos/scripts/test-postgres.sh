@@ -30,6 +30,7 @@ container_id=$(docker run --detach --rm \
     --mount "type=bind,source=$SERVICE_DIR/sql/migracion-retenciones.sql,target=/verificacion/migracion.sql,readonly" \
     --mount "type=bind,source=$SERVICE_DIR/sql/migracion-outbox.sql,target=/verificacion/outbox.sql,readonly" \
     --mount "type=bind,source=$SERVICE_DIR/sql/migracion-outbox-validacion.sql,target=/verificacion/validacion.sql,readonly" \
+    --mount "type=bind,source=$SERVICE_DIR/sql/migracion-inbox-reservas.sql,target=/verificacion/inbox.sql,readonly" \
     --mount "type=bind,source=$SERVICE_DIR/src/test/resources/sql/outbox-antes-validacion.sql,target=/verificacion/fixtures-outbox.sql,readonly" \
     --mount "type=bind,source=$SERVICE_DIR/src/test/resources/sql/esquema-original.sql,target=/verificacion/original.sql,readonly" \
     postgres:15-alpine)
@@ -61,12 +62,15 @@ docker exec "$container_id" psql -U inventario_test -d db_inventario_migracion -
         END \$\$;"
 docker exec "$container_id" psql -U inventario_test -d db_inventario_migracion -v ON_ERROR_STOP=1 \
     -f /verificacion/fixtures-outbox.sql -f /verificacion/validacion.sql -f /verificacion/validacion.sql \
+    -f /verificacion/inbox.sql -f /verificacion/inbox.sql \
     -c "DO \$\$ BEGIN
         IF (SELECT count(*) FROM inventario_outbox) <> 3
            OR (SELECT count(DISTINCT estado) FROM inventario_outbox) <> 3
            OR (SELECT count(*) FROM inventario_outbox WHERE mensaje = '{\"fixture\":\"conservar\"}') <> 3
            OR (SELECT count(*) FROM retenciones) <> 3
            OR (SELECT count(*) FROM asientos) <> 2
+           OR (SELECT count(*) FROM inventario_inbox) <> 0
+           OR (SELECT count(*) FROM inventario_solicitudes) <> 0
            OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'inventario_outbox'::regclass
                          AND conname = 'inventario_outbox_estado_check'
                          AND pg_get_constraintdef(oid) LIKE '%ERROR_DATOS%')
@@ -92,7 +96,13 @@ export INVENTARIO_POSTGRES_INTEGRATION=true
 export INVENTARIO_TEST_DB_URL="jdbc:postgresql://127.0.0.1:${binding##*:}/db_inventario"
 export INVENTARIO_TEST_DB_USER=inventario_test
 export INVENTARIO_TEST_DB_PASSWORD=inventario_test_aislado
+export INVENTARIO_TEST_POSTGRES_CONTAINER="$container_id"
 if [[ "${INVENTARIO_RABBIT_INTEGRATION:-false}" == true ]]; then
+    docker exec "$container_id" psql -U inventario_test -d db_inventario -v ON_ERROR_STOP=1 \
+        -c 'CREATE DATABASE db_inventario_inbox;'
+    docker exec "$container_id" psql -U inventario_test -d db_inventario_inbox -v ON_ERROR_STOP=1 \
+        -f /docker-entrypoint-initdb.d/init.sql
+    export INVENTARIO_TEST_INBOX_DB_URL="jdbc:postgresql://127.0.0.1:${binding##*:}/db_inventario_inbox?socketTimeout=1&connectTimeout=1"
     rabbit_id=$(docker run --detach \
         --label proyecto=inventario-outbox-integracion \
         --env RABBITMQ_DEFAULT_USER=inventario_test \
