@@ -5,11 +5,33 @@ spring:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/db_inventario
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USER:guest}
     password: ${RABBITMQ_PASS:guest}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    connection-timeout: 2s
+    template:
+      mandatory: true
 
 server:
   port: 8085
+
+inventario:
+  ttl-segundos: ${INVENTARIO_TTL_SEGUNDOS:300}
+  expiracion-habilitada: ${INVENTARIO_EXPIRACION_HABILITADA:true}
+  intervalo-expiracion-ms: ${INVENTARIO_INTERVALO_EXPIRACION_MS:10000}
+  consumidor:
+    # Contrato acordado: activar únicamente tras comprobar topología compartida y DLQ con Isaac.
+    habilitado: ${INVENTARIO_CONSUMIDOR_HABILITADO:false}
+  outbox:
+    habilitada: ${INVENTARIO_OUTBOX_HABILITADA:true}
+    intervalo-ms: ${INVENTARIO_OUTBOX_INTERVALO_MS:5000}
+    confirm-timeout-ms: ${INVENTARIO_OUTBOX_CONFIRM_TIMEOUT_MS:5000}
+    reintento-segundos: ${INVENTARIO_OUTBOX_REINTENTO_SEGUNDOS:5}
