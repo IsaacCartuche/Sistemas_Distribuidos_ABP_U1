@@ -1,13 +1,8 @@
--- Base de datos: db_usuarios
--- Servicio: Usuarios
-
 CREATE TABLE IF NOT EXISTS usuarios (
     id SERIAL PRIMARY KEY,
-    nombre VARCHAR(100) NOT NULL,
-    email VARCHAR(150) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    rol VARCHAR(20) DEFAULT 'CLIENTE',
-    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    email VARCHAR(150) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    nombre VARCHAR(100),
+    apellido VARCHAR(100),
+    rol VARCHAR(50) NOT NULL DEFAULT 'ROLE_PASAJERO'
 );
-
-CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email);
