@@ -19,26 +19,26 @@ api.interceptors.request.use((config) => {
 });
 
 export const authService = {
-  login: (credentials) => api.post('/auth/login', credentials),
-  register: (userData) => api.post('/auth/register', userData),
+  login: (credentials) => api.post('/api/auth/login', credentials),
+  register: (userData) => api.post('/api/auth/register', userData),
   setToken: (token) => localStorage.setItem('token', token),
   getToken: () => localStorage.getItem('token'),
   removeToken: () => localStorage.removeItem('token'),
 };
 
 export const vuelosService = {
-  listar: () => api.get('/vuelos'),
-  detalle: (id) => api.get(`/vuelos/${id}`),
+  listar: () => api.get('/api/vuelos'),
+  detalle: (id) => api.get(`/api/vuelos/${id}`),
 };
 
 export const reservasService = {
-  crear: (reserva) => api.post('/reservas', reserva),
-  listar: () => api.get('/reservas'),
-  cancelar: (id) => api.delete(`/reservas/${id}`),
+  crear: (reserva) => api.post('/api/reservas', reserva),
+  listar: () => api.get('/api/reservas'),
+  cancelar: (id) => api.delete(`/api/reservas/${id}`),
 };
 
 export const pagosService = {
-  procesar: (pago) => api.post('/pagos', pago),
+  procesar: (pago) => api.post('/api/pagos', pago),
 };
 
 export { WS_BASE };
