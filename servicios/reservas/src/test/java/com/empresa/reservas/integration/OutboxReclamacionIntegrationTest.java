@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -28,12 +29,28 @@ class OutboxReclamacionIntegrationTest {
     void reclamarEventosDebeActualizarSuEstado() {
 
         UUID instanciaId = UUID.randomUUID();
+        OutboxEvento eventoPrueba = new OutboxEvento();
 
-        List<OutboxEvento> eventos =
-                reclamacionService.reclamarPendientes(instanciaId);
+        eventoPrueba.setId(UUID.randomUUID());
+        eventoPrueba.setCorrelationId(UUID.randomUUID());
+        eventoPrueba.setTipo("reserva.creada");
+        eventoPrueba.setExchange("vuelos.events");
+        eventoPrueba.setRoutingKey("reserva.creada");
+        eventoPrueba.setPayload("{\"tipo\":\"prueba\"}");
+        eventoPrueba.setEstado("PENDIENTE");
+        eventoPrueba.setFechaCreacion(LocalDateTime.now());
+        eventoPrueba.setIntentos(0);
+
+        repository.saveAndFlush(eventoPrueba);
+
+        List<OutboxEvento> eventos = reclamacionService.reclamarPendientes(instanciaId);
 
         assertFalse(eventos.isEmpty(),
                 "Deben existir eventos pendientes para probar");
+        assertTrue(
+                eventos.stream()
+                        .anyMatch(e -> e.getId().equals(eventoPrueba.getId())),
+                "El evento creado por la prueba debe ser reclamado");
 
         for (OutboxEvento evento : eventos) {
 
@@ -43,14 +60,12 @@ class OutboxReclamacionIntegrationTest {
             assertTrue(evento.getIntentos() >= 1);
         }
 
-        List<OutboxEvento> pendientes =
-                repository.bloquearEventosPendientes("PENDIENTE");
+        List<OutboxEvento> pendientes = repository.bloquearEventosPendientes("PENDIENTE");
 
         for (OutboxEvento evento : eventos) {
             assertTrue(
                     pendientes.stream()
-                            .noneMatch(p -> p.getId().equals(evento.getId()))
-            );
+                            .noneMatch(p -> p.getId().equals(evento.getId())));
         }
     }
 }
