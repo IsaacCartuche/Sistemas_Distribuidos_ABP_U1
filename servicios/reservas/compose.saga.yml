@@ -1,0 +1,75 @@
+# Infraestructura y servicios exclusivos de Sebastian; no usa recursos del compose raiz.
+name: sebastian-saga
+services:
+  postgres-reservas:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: db_reservas
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${SAGA_DB_PASSWORD:-postgres}
+    ports: ["127.0.0.1:55442:5432"]
+    volumes:
+      - reservas-data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d db_reservas"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  postgres-pagos:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: db_pagos
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${SAGA_DB_PASSWORD:-postgres}
+    ports: ["127.0.0.1:55443:5432"]
+    volumes:
+      - pagos-data:/var/lib/postgresql/data
+      - ../pagos/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d db_pagos"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: saga
+      RABBITMQ_DEFAULT_PASS: ${SAGA_RABBIT_PASSWORD:-saga_dev}
+    ports: ["127.0.0.1:5572:5672", "127.0.0.1:15572:15672"]
+    volumes: ["rabbit-data:/var/lib/rabbitmq"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  reservas:
+    build: .
+    ports: ["127.0.0.1:8082:8082"]
+    environment:
+      POSTGRES_HOST: postgres-reservas
+      POSTGRES_PASSWORD: ${SAGA_DB_PASSWORD:-postgres}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: saga
+      RABBITMQ_PASS: ${SAGA_RABBIT_PASSWORD:-saga_dev}
+      SAGA_HABILITADA: ${SAGA_HABILITADA:-false}
+    depends_on:
+      postgres-reservas: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+  pagos:
+    build: ../pagos
+    ports: ["127.0.0.1:8083:8083"]
+    environment:
+      POSTGRES_HOST: postgres-pagos
+      POSTGRES_PASSWORD: ${SAGA_DB_PASSWORD:-postgres}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: saga
+      RABBITMQ_PASS: ${SAGA_RABBIT_PASSWORD:-saga_dev}
+      SAGA_HABILITADA: ${SAGA_HABILITADA:-false}
+    depends_on:
+      postgres-pagos: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+volumes:
+  reservas-data:
+  pagos-data:
+  rabbit-data:

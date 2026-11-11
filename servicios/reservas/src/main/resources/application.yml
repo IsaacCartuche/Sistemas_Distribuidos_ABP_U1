@@ -2,9 +2,13 @@ spring:
   application:
     name: servicio-reservas
   datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/db_reservas
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:db_reservas}
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
@@ -17,3 +21,11 @@ spring:
 
 server:
   port: 8082
+
+saga:
+  habilitada: ${SAGA_HABILITADA:false}
+outbox:
+  publicacion:
+    habilitada: ${OUTBOX_PUBLICACION_HABILITADA:true}
+  recuperacion:
+    habilitada: ${OUTBOX_RECUPERACION_HABILITADA:true}

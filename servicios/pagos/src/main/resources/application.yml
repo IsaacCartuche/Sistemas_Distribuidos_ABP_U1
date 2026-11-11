@@ -2,14 +2,30 @@ spring:
   application:
     name: servicio-pagos
   datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/db_pagos
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:db_pagos}
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USER:guest}
     password: ${RABBITMQ_PASS:guest}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
 
 server:
   port: 8083
+
+saga:
+  habilitada: ${SAGA_HABILITADA:false}
+outbox:
+  publicacion:
+    habilitada: ${OUTBOX_PUBLICACION_HABILITADA:true}
+  recuperacion:
+    habilitada: ${OUTBOX_RECUPERACION_HABILITADA:true}

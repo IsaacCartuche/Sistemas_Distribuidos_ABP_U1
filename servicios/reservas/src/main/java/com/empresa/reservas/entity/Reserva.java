@@ -51,6 +51,15 @@ public class Reserva {
     private Integer asientoId;
 
     
+    @Column(name="asiento_bloqueado", nullable=false)
+    private boolean asientoBloqueado;
+    @Column(name="pago_exitoso", nullable=false)
+    private boolean pagoExitoso;
+    public boolean isAsientoBloqueado(){return asientoBloqueado;}
+    public void setAsientoBloqueado(boolean v){asientoBloqueado=v;}
+    public boolean isPagoExitoso(){return pagoExitoso;}
+    public void setPagoExitoso(boolean v){pagoExitoso=v;}
+
     public Reserva() {
     }
 

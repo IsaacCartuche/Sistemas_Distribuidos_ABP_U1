@@ -50,6 +50,8 @@ public class ReservaService {
                 || !request.asiento().matches("[A-Za-z0-9-]{1,10}")
                 || request.total() == null
                 || request.total().compareTo(BigDecimal.ZERO) <= 0
+                || request.total().scale() > 2
+                || request.total().compareTo(new BigDecimal("99999999.99")) > 0
                 || request.idempotencyKey() == null
                 || request.idempotencyKey().isBlank()
                 || request.idempotencyKey().length() > 100) {

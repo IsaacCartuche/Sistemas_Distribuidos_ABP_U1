@@ -211,4 +211,15 @@ class ReservaServiceTest {
                                 .findByIdempotencyKey("reserva-concurrente-001");
         }
 
+    @org.junit.jupiter.api.Test
+    void rechazaImportesQueLaBaseRedondearia() {
+        var request = new com.empresa.reservas.dto.CrearReservaRequest(1,1,"1A",new java.math.BigDecimal("1.001"),"precision");
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> service.crearReserva(request));
+    }
+
+    @org.junit.jupiter.api.Test
+    void rechazaImporteFueraDePrecisionSql() {
+        var request = new com.empresa.reservas.dto.CrearReservaRequest(1,1,"1A",new java.math.BigDecimal("100000000.00"),"precision");
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> service.crearReserva(request));
+    }
 }

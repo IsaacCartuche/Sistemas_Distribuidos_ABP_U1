@@ -33,7 +33,8 @@ public class ReservaEventoFactory {
                         reserva.getVueloId(),
                         reserva.getAsiento(),
                         reserva.getToken(),
-                        reserva.getAsientoId()
+                        reserva.getAsientoId(),
+                        reserva.getTotal()
                 )
         );
 

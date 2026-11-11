@@ -16,7 +16,9 @@ public record ReservaCreadaEvento(
             Integer vueloId,
             String asiento,
             UUID token,
-            Integer asientoId
+            Integer asientoId,
+            java.math.BigDecimal total
     ) {
+        public Payload(Integer reservaId,Integer vueloId,String asiento,UUID token,Integer asientoId) {this(reservaId,vueloId,asiento,token,asientoId,null);}
     }
 }

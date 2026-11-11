@@ -13,10 +13,11 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@org.springframework.context.annotation.Import(OutboxTestTopology.class)
 @SpringBootTest
 class OutboxRabbitPublisherIntegrationTest {
 
-        private static final String COLA_PRUEBA = "reservas.test.outbox";
+        static final String COLA_PRUEBA = "reservas.test.outbox." + UUID.randomUUID();
 
         @Autowired
         private OutboxRabbitPublisher publisher;
