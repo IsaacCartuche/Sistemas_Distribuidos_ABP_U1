@@ -22,11 +22,13 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     @Value("${jwt.secret}")
     private String jwtSecret;
 
-    // Rutas públicas accesibles sin token JWT
+    // Se agregan las rutas públicas de autenticación y de salud
     private static final List<String> EXCLUDED_PATHS = List.of(
+            "/api/auth/",
             "/api/usuarios/login",
             "/api/usuarios/registro",
-            "/api/vuelos"
+            "/api/vuelos",
+            "/actuator"
     );
 
     @Override
@@ -57,7 +59,6 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                     .parseClaimsJws(token)
                     .getBody();
 
-            // Inyección de cabeceras HTTP hacia los microservicios downstream
             ServerHttpRequest modifiedRequest = request.mutate()
                     .header("X-User-Id", String.valueOf(claims.get("userId")))
                     .header("X-User-Role", String.valueOf(claims.get("role")))
