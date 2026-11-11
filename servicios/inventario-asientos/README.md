@@ -189,10 +189,50 @@ POSTGRES_HOST=localhost POSTGRES_PORT=5432 mvn spring-boot:run
 java -Xms256m -Xmx512m -jar target/servicio-inventario-asientos-1.0.0.jar
 ```
 
-El Dockerfile conserva Java 17, copia el JAR ya construido y declara 8085. Su contexto de construcción
-local es esta carpeta (`docker build -t servicio-inventario-asientos .`). No se ha probado el despliegue
-Compose ni modificado su contexto compartido. Para opciones JVM en contenedor se puede utilizar
-`JAVA_TOOL_OPTIONS`; el ENTRYPOINT actual no expande `JAVA_OPTS`.
+### Docker desde el contexto raíz de Compose
+
+Desde la raíz del repositorio, con Docker/BuildKit:
+
+```bash
+docker build --progress=plain -f servicios/inventario-asientos/Dockerfile -t servicio-inventario-asientos .
+```
+
+El contexto es **la raíz**, igual que `context: .` de `origin/integracion`, no la carpeta del servicio.
+La etapa de construcción utiliza Maven **3.9.12 / Java 17** y la imagen final JRE **17 Alpine**;
+declara el puerto **8085**. No requiere Maven local ni un `target/*.jar` previamente compilado.
+El build ejecuta `mvn -B -DskipTests package`; las pruebas se ejecutan por separado.
+
+Docker/BuildKit selecciona `servicios/inventario-asientos/Dockerfile.dockerignore` por estar junto al
+Dockerfile indicado con `-f`. Sus patrones se interpretan desde la raíz y solo permiten POM, fuentes y
+entrypoint de Inventario. Excluyen los `target/`, JARs locales, `.env` y archivos de otros servicios.
+
+El entrypoint hace `exec` de Java (PID 1) y aplica `JAVA_OPTS`, por ejemplo
+`JAVA_OPTS=-Xms256m -Xmx512m`. Separa opciones por espacios, sin `eval` ni expansión de comodines, y
+conserva los argumentos de aplicación. Las comillas dentro de `JAVA_OPTS` no se reinterpretan.
+`JAVA_TOOL_OPTIONS`, cuando existe, se conserva y la interpreta directamente la JVM; resulta apropiada
+para opciones con valores que requieren quoting. Evitar opciones contradictorias entre ambas variables.
+
+Variables del contenedor:
+
+| Variable | Valor en una red Compose local |
+|----------|--------------------------------|
+| `POSTGRES_HOST` / `POSTGRES_PORT` | `postgres-inventario` / `5432` |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` | Credenciales de la propia `db_inventario` |
+| `RABBITMQ_HOST` / `RABBITMQ_PORT` | `rabbitmq` / `5672` |
+| `RABBITMQ_USER` / `RABBITMQ_PASS` | Credenciales del broker |
+| `JAVA_OPTS` | Opciones JVM válidas; opcional fuera de Compose |
+| `JAVA_TOOL_OPTIONS` | Opciones adicionales interpretadas por la JVM; opcional |
+| `INVENTARIO_CONSUMIDOR_HABILITADO` | `false` hasta verificar contrato, topología y DLQ |
+
+Las variables TTL/Outbox documentadas en este README conservan sus valores y significado.
+La base debe inicializarse con el esquema completo o migrarse mediante el procedimiento explícito anterior.
+El build y el entrypoint no ejecutan SQL ni declaran topología RabbitMQ.
+
+**Pendiente de Isaac:** el fallback de Compose `Xmx512m -Xms256m` es inválido: debe ser
+`-Xmx512m -Xms256m`. El entrypoint aplica el valor recibido sin repararlo. Mientras se coordina la
+corrección compartida, proporcionar explícitamente `JAVA_OPTS='-Xmx512m -Xms256m'` en el entorno de
+Compose. También corresponden a Isaac la importación de definitions, bindings y DLQ antes de habilitar
+el consumidor. No se modificó infraestructura compartida.
 
 ## Pruebas
 
@@ -203,9 +243,20 @@ mvn test
 bash scripts/test-postgres.sh
 # PostgreSQL + RabbitMQ nuevos y aislados, con pruebas de confirms/returns/recuperación:
 bash scripts/test-outbox.sh
+# Imagen desde contexto raíz y smoke test con PostgreSQL/RabbitMQ temporales:
+python3 scripts/test-docker.py
 ```
 
-El script crea un contenedor PostgreSQL nuevo, usa **db_inventario**, credenciales de prueba,
+`test-docker.py` requiere Docker y Python 3. Construye desde la raíz, crea una red exclusiva y dos
+contenedores de dependencias con credenciales de prueba y datos en `tmpfs`, e inicializa una base nueva
+con `sql/init.sql`. Publica HTTP y management de RabbitMQ solo en `127.0.0.1` y puertos libres. Declara
+topología exclusivamente en ese broker y activa el listener solo en la aplicación temporal.
+Comprueba puerto 8085, ambas rutas, esquema completo, JVM (`JAVA_OPTS` y `JAVA_TOOL_OPTIONS`), recepción
+de `reserva.creada`, bloqueo persistido y resultado Outbox en RabbitMQ. Al terminar retira únicamente
+sus contenedores/red; la imagen y la caché de build pueden permanecer. No usa Compose ni bases o
+volúmenes existentes. Esta prueba de empaquetado es independiente de las 265 pruebas de la Saga.
+
+El script `test-postgres.sh` crea un contenedor PostgreSQL nuevo, usa **db_inventario**, credenciales de prueba,
 puerto host libre en `127.0.0.1` y datos temporales en `tmpfs`. Monta `init.sql`, la migración
 y la fixture original en lectura, espera la conexión TCP y ejecuta `mvn verify` (pruebas y empaquetado). Al terminar detiene solo
 el contenedor creado, eliminado automáticamente. No usa Compose ni volúmenes persistentes.
@@ -767,6 +818,21 @@ fallos de la suite. Reportes: `target/surefire-reports/`.
 Se inspeccionó la base local mediante una transacción READ ONLY: existían Inbox/Outbox, pero Inbox.tipo
 seguía en VARCHAR(30) y Outbox no tenía clave_negocio. La nueva migración sigue pendiente de aplicación
 local autorizada. Los contenedores del equipo no se detuvieron; los temporales se retiraron al finalizar.
+
+## Validación del empaquetado Docker (2026-11-10)
+
+- `python3 servicios/inventario-asientos/scripts/test-docker.py`, desde la raíz: **OK**. Build multietapa
+  con contexto raíz (201.61 kB transferidos, excluidos los JARs locales), Maven 3.9.12 y JRE Temurin
+  17.0.21. Arranque sobre PostgreSQL 15 y RabbitMQ 3 temporales, esquema completo, puerto 8085 y ambas
+  rutas REST. Se comprobó Java como PID 1, `JAVA_OPTS=-Xms128m -Xmx256m ...` y la aplicación simultánea
+  de `JAVA_TOOL_OPTIONS=-XX:+PrintCommandLineFlags ...`, con heap máximo efectivo de 256 MiB.
+- Se publicó `reserva.creada` solo en el broker temporal y se verificaron Inbox, asiento BLOQUEADO,
+  Outbox ENVIADO y recepción de `asiento.bloqueado` con los identificadores originales.
+- `bash servicios/inventario-asientos/scripts/test-outbox.sh`: **mvn verify → BUILD SUCCESS**, con
+  **265 pruebas, 0 fallos, 0 errores y 0 omitidas**. Incluye SQL/migraciones exclusivamente sobre bases
+  temporales. Los errores de conexión/rechazo inducidos pertenecen a los casos de prueba esperados.
+- Los contenedores temporales y su red se retiraron; los contenedores existentes permanecieron intactos.
+  No se ejecutó el Compose compartido ni se aplicaron migraciones sobre bases existentes.
 La comunicación real se comprobó en aislamiento, **no** con Reservas/Pagos reales ni la topología compartida.
 
 ## Integraciones pendientes
