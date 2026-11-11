@@ -23,7 +23,7 @@ public class ConsumidorConfig {
         factory.setAcknowledgeMode(AcknowledgeMode.AUTO);
         factory.setDefaultRequeueRejected(false);
         factory.setPrefetchCount(1);
-        factory.setMissingQueuesFatal(true);
+        factory.setMissingQueuesFatal(false);
         var policy = new SimpleRetryPolicy(3, Map.of(EventoReservaInvalido.class, false), true, true);
         factory.setAdviceChain(RetryInterceptorBuilder.stateless().retryPolicy(policy)
                 .backOffOptions(100, 2, 500)

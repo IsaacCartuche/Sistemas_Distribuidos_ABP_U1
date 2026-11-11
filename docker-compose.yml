@@ -11,6 +11,7 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+      RABBITMQ_LOAD_DEFINITIONS: /etc/rabbitmq/definitions.json
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
       - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
@@ -159,7 +160,7 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
     depends_on:
       postgres-vuelos:
         condition: service_healthy
@@ -185,7 +186,7 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
     depends_on:
       postgres-reservas:
         condition: service_healthy
@@ -211,7 +212,7 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
     depends_on:
       postgres-pagos:
         condition: service_healthy
@@ -238,7 +239,7 @@ services:
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
       JWT_SECRET: ${JWT_SECRET}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
     depends_on:
       postgres-usuarios:
         condition: service_healthy
@@ -264,7 +265,7 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
       INVENTARIO_CONSUMIDOR_HABILITADO: "true"
     depends_on:
       postgres-inventario:
@@ -291,7 +292,7 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
     depends_on:
       postgres-notificaciones:
         condition: service_healthy
@@ -323,12 +324,14 @@ services:
       INVENTARIO_HOST: ${INVENTARIO_HOST:-servicio-inventario-asientos}
       NOTIFICACIONES_HOST: ${NOTIFICACIONES_HOST:-servicio-notificaciones}
       JWT_SECRET: ${JWT_SECRET}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      # La imagen eclipse-temurin:17-jre-alpine no trae curl; busybox wget si.
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/actuator/health"]
       interval: 30s
       timeout: 10s
       retries: 5
+      start_period: 40s
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -351,7 +354,7 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -361,8 +364,8 @@ services:
   # ============================================================
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: frontend
     profiles:
       - frontend

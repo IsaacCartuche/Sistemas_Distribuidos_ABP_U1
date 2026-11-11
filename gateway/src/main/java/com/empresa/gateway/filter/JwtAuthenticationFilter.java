@@ -28,6 +28,9 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
             "/api/usuarios/login",
             "/api/usuarios/registro",
             "/api/vuelos",
+            "/api/reservas",  // Para crear reservas (POST)
+            "/api/pagos",     // Para procesar pagos (POST)
+            "/api/notificaciones", // Para consultar notificaciones
             "/actuator"
     );
 

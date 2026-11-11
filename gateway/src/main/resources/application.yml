@@ -6,7 +6,37 @@ spring:
     name: api-gateway
   cloud:
     gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins:
+              - "http://localhost:3000"
+              - "http://localhost:80"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - OPTIONS
+              - PATCH
+            allowedHeaders:
+              - "*"
+            allowCredentials: true
       routes:
+        # 0. Ruta para manejar preflight CORS (OPTIONS) - debe ir ANTES que las demás
+        - id: cors-preflight
+          uri: "no://op"  # No forward to any backend
+          predicates:
+            - Method=OPTIONS
+          filters:
+            - RemoveRequestHeader=Content-Length
+            - SetResponseHeader=Access-Control-Allow-Origin, http://localhost:3000
+            - SetResponseHeader=Access-Control-Allow-Methods, GET,POST,PUT,DELETE,OPTIONS,PATCH
+            - SetResponseHeader=Access-Control-Allow-Headers, *
+            - SetResponseHeader=Access-Control-Allow-Credentials, true
+            - SetResponseHeader=Access-Control-Max-Age, 3600
+            - SetStatus=200
+
         # 1. Ruta de Autenticación para el Frontend (/api/auth/login, /api/auth/register)
         - id: servicio-usuarios-auth
           uri: http://${USUARIOS_HOST:servicio-usuarios}:8084
@@ -48,6 +78,8 @@ spring:
           uri: http://${NOTIFICACIONES_HOST:servicio-notificaciones}:8086
           predicates:
             - Path=/api/notificaciones/**
+          filters:
+            - StripPrefix=1
 
 jwt:
   secret: ${JWT_SECRET}

@@ -1,32 +1,27 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { authService } from '../services/api';
-import { conectarWebSocket, desconectarWebSocket } from '../services/websocket';
+import {
+  conectarWebSocket,
+  desconectarWebSocket,
+} from '../services/websocket';
 
 function Navbar() {
-  const [usuario, setUsuario] = useState(null);
-  const [notificaciones, setNotificaciones] = useState([]);
+  const [usuario, setUsuario] = useState(() => authService.getUsuario());
+  const [notificaciones, setNotificaciones] = useState(0);
 
-  const token = authService.getToken();
-
+  // Escucha el evento de login/logout para refrescar la sesion.
   useEffect(() => {
-    if (token) {
-      const usuarioGuardado = localStorage.getItem('usuario');
-      if (usuarioGuardado) {
-        try {
-          setUsuario(JSON.parse(usuarioGuardado));
-        } catch (e) {
-          setUsuario(null);
-        }
-      }
-    }
-  }, [token]);
+    const onAuthChange = () => setUsuario(authService.getUsuario());
+    window.addEventListener('auth-change', onAuthChange);
+    return () => window.removeEventListener('auth-change', onAuthChange);
+  }, []);
 
   useEffect(() => {
     if (usuario && usuario.id) {
-      conectarWebSocket(usuario.id, (msg) => {
-        setNotificaciones((prev) => [...prev, msg]);
-      });
+      conectarWebSocket(usuario.id, () =>
+        setNotificaciones((prev) => prev + 1)
+      );
     }
     return () => {
       desconectarWebSocket();
@@ -35,31 +30,41 @@ function Navbar() {
 
   const handleLogout = () => {
     authService.removeToken();
-    localStorage.removeItem('usuario');
+    authService.removeUsuario();
     desconectarWebSocket();
     setUsuario(null);
+    setNotificaciones(0);
+    window.dispatchEvent(new Event('auth-change'));
     window.location.reload();
   };
-
-  if (!usuario) {
-    return (
-      <nav className="navbar">
-        <Link to="/">Reservas de Vuelos</Link>
-        <div className="navbar-actions">
-          <Link to="/login">Iniciar sesión</Link>
-          <Link to="/registro">Registrarse</Link>
-        </div>
-      </nav>
-    );
-  }
 
   return (
     <nav className="navbar">
       <Link to="/">Reservas de Vuelos</Link>
       <div className="navbar-actions">
-        <span>Hola, {usuario.nombre || 'Usuario'}</span>
-        <span className="badge">{notificaciones.length} nuevas</span>
-        <button onClick={handleLogout}>Cerrar sesión</button>
+        {usuario ? (
+          <>
+            <Link to="/reservas">Mis reservas</Link>
+            <Link to="/notificaciones">
+              Notificaciones
+              {notificaciones > 0 && (
+                <span className="badge">{notificaciones}</span>
+              )}
+            </Link>
+            <span className="muted">
+              Hola, {usuario.nombre || usuario.email || 'Usuario'}
+            </span>
+            {usuario.rol === 'ROLE_ADMIN' && (
+              <Link to="/admin">Panel de Administrador</Link>
+            )}
+            <button onClick={handleLogout}>Cerrar sesión</button>
+          </>
+        ) : (
+          <>
+            <Link to="/login">Iniciar sesión</Link>
+            <Link to="/registro">Registrarse</Link>
+          </>
+        )}
       </div>
     </nav>
   );

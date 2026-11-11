@@ -34,8 +34,9 @@ public class NotificacionService {
 
     @Transactional
     public void procesarEvento(NotificacionEntradaDTO evento) {
+        Integer usuarioId = Integer.parseInt(evento.usuarioId());
         Notificacion notificacion = new Notificacion(
-                evento.usuarioId(),
+                usuarioId,
                 evento.tipo(),
                 evento.mensaje(),
                 LocalDateTime.now()
@@ -56,7 +57,7 @@ public class NotificacionService {
     }
 
     @Transactional(readOnly = true)
-    public List<NotificacionRespuestaDTO> listarPorUsuario(String usuarioId) {
+    public List<NotificacionRespuestaDTO> listarPorUsuario(Integer usuarioId) {
         return repository.findByUsuarioIdOrderByFechaEnvioDesc(usuarioId).stream()
                 .map(n -> new NotificacionRespuestaDTO(
                         n.getId(),
@@ -70,7 +71,7 @@ public class NotificacionService {
     }
 
     @Transactional
-    public void marcarLeida(Long id, String usuarioId) {
+    public void marcarLeida(Long id, Integer usuarioId) {
         Notificacion n = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Notificación no encontrada: " + id));
         if (!n.getUsuarioId().equals(usuarioId)) {

@@ -29,7 +29,7 @@ inventario:
   intervalo-expiracion-ms: ${INVENTARIO_INTERVALO_EXPIRACION_MS:10000}
   consumidor:
     # Contrato acordado: activar únicamente tras comprobar topología compartida y DLQ con Isaac.
-    habilitado: ${INVENTARIO_CONSUMIDOR_HABILITADO:false}
+    habilitado: ${INVENTARIO_CONSUMIDOR_HABILITADO:true}
   outbox:
     habilitada: ${INVENTARIO_OUTBOX_HABILITADA:true}
     intervalo-ms: ${INVENTARIO_OUTBOX_INTERVALO_MS:5000}

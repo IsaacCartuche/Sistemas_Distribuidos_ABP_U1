@@ -1,11 +1,11 @@
 import { conectarWebSocket, desconectarWebSocket } from './websocket';
 
 jest.mock('@stomp/stompjs', () => ({
-  Client: jest.fn().mockImplementation(() => ({
-    activate: jest.fn(),
-    deactivate: jest.fn(),
-    subscribe: jest.fn(),
-  })),
+  Client: function Client() {
+    this.activate = jest.fn();
+    this.deactivate = jest.fn();
+    this.subscribe = jest.fn();
+  },
 }));
 
 jest.mock('sockjs-client', () => jest.fn(() => ({})));

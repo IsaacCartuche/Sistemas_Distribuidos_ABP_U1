@@ -2,8 +2,10 @@ package com.empresa.notificaciones.consumer;
 
 import com.empresa.notificaciones.dto.NotificacionEntradaDTO;
 import com.empresa.notificaciones.service.NotificacionService;
+import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.messaging.handler.annotation.Payload;
+import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 
 /**
@@ -19,6 +21,15 @@ public class EventoConsumer {
 
     public EventoConsumer(NotificacionService notificacionService) {
         this.notificacionService = notificacionService;
+    }
+
+    @Bean
+    public Queue notificacionesEntradaQueue() {
+        return org.springframework.amqp.core.QueueBuilder.durable("notificaciones.entrada")
+                .withArgument("x-max-priority", 5)
+                .withArgument("x-dead-letter-exchange", "vuelos.dlx")
+                .withArgument("x-dead-letter-routing-key", "notificacion.entrada.dlq")
+                .build();
     }
 
     @RabbitListener(queues = "notificaciones.entrada")

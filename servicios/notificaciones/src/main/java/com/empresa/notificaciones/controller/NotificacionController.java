@@ -21,14 +21,14 @@ public class NotificacionController {
     }
 
     @GetMapping("/usuario/{usuarioId}")
-    public ResponseEntity<List<NotificacionRespuestaDTO>> listar(@PathVariable String usuarioId) {
+    public ResponseEntity<List<NotificacionRespuestaDTO>> listar(@PathVariable Integer usuarioId) {
         List<NotificacionRespuestaDTO> notificaciones = notificacionService.listarPorUsuario(usuarioId);
         return ResponseEntity.ok(notificaciones);
     }
 
     @PatchMapping("/{id}/leida")
     public ResponseEntity<Void> marcarLeida(@PathVariable Long id,
-                                            @RequestParam String usuarioId) {
+                                            @RequestParam Integer usuarioId) {
         notificacionService.marcarLeida(id, usuarioId);
         return ResponseEntity.noContent().build();
     }

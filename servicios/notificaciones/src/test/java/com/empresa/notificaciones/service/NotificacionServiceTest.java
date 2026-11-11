@@ -1,6 +1,7 @@
 package com.empresa.notificaciones.service;
 
 import com.empresa.notificaciones.dto.NotificacionEntradaDTO;
+import com.empresa.notificaciones.dto.NotificacionSalidaDTO;
 import com.empresa.notificaciones.entity.Notificacion;
 import com.empresa.notificaciones.repository.NotificacionRepository;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,6 @@ class NotificacionServiceTest {
     void procesarEvento_guardaEnBD_yPublicaRabbitMQ() {
         NotificacionEntradaDTO evento = new NotificacionEntradaDTO("u1", "RESERVA_CREADA", "Reserva confirmada");
         Notificacion guardada = new Notificacion("u1", "RESERVA_CREADA", "Reserva confirmada", LocalDateTime.now());
-        guardada.setId(1L);
 
         when(repository.save(any(Notificacion.class))).thenReturn(guardada);
 
@@ -40,9 +40,9 @@ class NotificacionServiceTest {
 
         verify(repository, times(1)).save(any(Notificacion.class));
         verify(rabbitTemplate, times(1)).convertAndSend(
-                "vuelos.events",
-                "notificacion.baja",
-                argThat(dto -> dto.usuarioId().equals("u1") && dto.tipo().equals("RESERVA_CREADA"))
+                eq("vuelos.events"),
+                eq("notificacion.baja"),
+                argThat((NotificacionSalidaDTO dto) -> dto.usuarioId().equals("u1") && dto.tipo().equals("RESERVA_CREADA"))
         );
     }
 

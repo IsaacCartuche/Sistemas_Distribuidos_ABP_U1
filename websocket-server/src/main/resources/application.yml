@@ -6,6 +6,12 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USER:guest}
     password: ${RABBITMQ_PASS:guest}
+    listener:
+      simple:
+        missing-queues-fatal: false
+        # Un mensaje con payload invalido no debe reintentarse en bucle:
+        # se rechaza y viaja a la DLQ de la cola.
+        default-requeue-rejected: false
 
 server:
   port: 8090

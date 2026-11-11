@@ -16,7 +16,7 @@ public class Notificacion {
     private Long id;
 
     @Column(name = "usuario_id", nullable = false)
-    private String usuarioId;
+    private Integer usuarioId;
 
     @Column(nullable = false)
     private String tipo;
@@ -32,7 +32,7 @@ public class Notificacion {
 
     protected Notificacion() {}
 
-    public Notificacion(String usuarioId, String tipo, String mensaje, LocalDateTime fechaEnvio) {
+    public Notificacion(Integer usuarioId, String tipo, String mensaje, LocalDateTime fechaEnvio) {
         this.usuarioId = usuarioId;
         this.tipo = tipo;
         this.mensaje = mensaje;
@@ -40,7 +40,7 @@ public class Notificacion {
     }
 
     public Long getId() { return id; }
-    public String getUsuarioId() { return usuarioId; }
+    public Integer getUsuarioId() { return usuarioId; }
     public String getTipo() { return tipo; }
     public String getMensaje() { return mensaje; }
     public LocalDateTime getFechaEnvio() { return fechaEnvio; }

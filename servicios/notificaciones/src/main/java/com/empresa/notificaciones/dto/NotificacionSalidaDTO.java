@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
  * de websocket-server para mantener la independencia de despliegue.
  */
 public record NotificacionSalidaDTO(
-    String usuarioId,
+    Integer usuarioId,
     String tipo,
     String mensaje,
     LocalDateTime fecha

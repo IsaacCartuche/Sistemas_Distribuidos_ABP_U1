@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import Notificaciones from './components/Notificaciones';
+import Notificaciones from './Notificaciones';
 
 describe('Notificaciones', () => {
   it('muestra mensaje cuando no hay notificaciones', () => {

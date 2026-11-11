@@ -7,7 +7,7 @@ import java.time.LocalDateTime;
  */
 public record NotificacionRespuestaDTO(
     Long id,
-    String usuarioId,
+    Integer usuarioId,
     String tipo,
     String mensaje,
     LocalDateTime fechaEnvio,

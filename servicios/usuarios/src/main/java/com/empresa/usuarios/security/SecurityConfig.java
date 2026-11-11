@@ -22,9 +22,13 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
+            .httpBasic(httpBasic -> httpBasic.disable())
+            .formLogin(formLogin -> formLogin.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/**", "/api/usuarios/**", "/actuator/**").permitAll()
+                // /error debe ser publico: el dispatch de error de Spring MVC pasa por
+                // la cadena de seguridad y, si no, un 404/500 se convierte en 403.
+                .requestMatchers("/api/auth/**", "/api/usuarios/**", "/actuator/**", "/error").permitAll()
                 .anyRequest().authenticated()
             );
         return http.build();

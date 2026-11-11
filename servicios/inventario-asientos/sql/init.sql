@@ -15,6 +15,52 @@ CREATE TABLE IF NOT EXISTS asientos (
 
 CREATE INDEX IF NOT EXISTS idx_asientos_vuelo_estado ON asientos(vuelo_id, estado);
 
+-- Datos de prueba: Asientos para vuelos
+-- Vuelo 1: Madrid -> Barcelona (capacidad 150, pero solo agregamos algunos de prueba)
+INSERT INTO asientos (vuelo_id, numero_asiento, estado) VALUES
+(1, '1A', 'DISPONIBLE'), (1, '1B', 'DISPONIBLE'), (1, '1C', 'DISPONIBLE'),
+(1, '2A', 'DISPONIBLE'), (1, '2B', 'DISPONIBLE'), (1, '2C', 'DISPONIBLE'),
+(1, '3A', 'DISPONIBLE'), (1, '3B', 'DISPONIBLE'), (1, '3C', 'DISPONIBLE'),
+(1, '4A', 'DISPONIBLE'), (1, '4B', 'DISPONIBLE'), (1, '4C', 'DISPONIBLE'),
+(1, '5A', 'DISPONIBLE'), (1, '5B', 'DISPONIBLE'), (1, '5C', 'DISPONIBLE');
+
+-- Vuelo 2: Madrid -> Barcelona (capacidad 180)
+INSERT INTO asientos (vuelo_id, numero_asiento, estado) VALUES
+(2, '1A', 'DISPONIBLE'), (2, '1B', 'DISPONIBLE'), (2, '1C', 'DISPONIBLE'),
+(2, '2A', 'DISPONIBLE'), (2, '2B', 'DISPONIBLE'), (2, '2C', 'DISPONIBLE');
+
+-- Vuelo 3: Madrid -> Barcelona (capacidad 150)
+INSERT INTO asientos (vuelo_id, numero_asiento, estado) VALUES
+(3, '1A', 'DISPONIBLE'), (3, '1B', 'DISPONIBLE'), (3, '1C', 'DISPONIBLE');
+
+-- Vuelo 4: Barcelona -> Madrid (capacidad 150)
+INSERT INTO asientos (vuelo_id, numero_asiento, estado) VALUES
+(4, '1A', 'DISPONIBLE'), (4, '1B', 'DISPONIBLE'), (4, '1C', 'DISPONIBLE');
+
+-- Vuelo 5: Barcelona -> Madrid (capacidad 180)
+INSERT INTO asientos (vuelo_id, numero_asiento, estado) VALUES
+(5, '1A', 'DISPONIBLE'), (5, '1B', 'DISPONIBLE'), (5, '1C', 'DISPONIBLE');
+
+-- Vuelo 6: Barcelona -> Madrid (capacidad 150)
+INSERT INTO asientos (vuelo_id, numero_asiento, estado) VALUES
+(6, '1A', 'DISPONIBLE'), (6, '1B', 'DISPONIBLE'), (6, '1C', 'DISPONIBLE');
+
+-- Vuelo 7: Madrid -> Sevilla (capacidad 120)
+INSERT INTO asientos (vuelo_id, numero_asiento, estado) VALUES
+(7, '1A', 'DISPONIBLE'), (7, '1B', 'DISPONIBLE'), (7, '1C', 'DISPONIBLE');
+
+-- Vuelo 8: Sevilla -> Madrid (capacidad 120)
+INSERT INTO asientos (vuelo_id, numero_asiento, estado) VALUES
+(8, '1A', 'DISPONIBLE'), (8, '1B', 'DISPONIBLE'), (8, '1C', 'DISPONIBLE');
+
+-- Vuelo 9: Madrid -> Valencia (capacidad 100)
+INSERT INTO asientos (vuelo_id, numero_asiento, estado) VALUES
+(9, '1A', 'DISPONIBLE'), (9, '1B', 'DISPONIBLE'), (9, '1C', 'DISPONIBLE');
+
+-- Vuelo 10: Valencia -> Madrid (capacidad 100)
+INSERT INTO asientos (vuelo_id, numero_asiento, estado) VALUES
+(10, '1A', 'DISPONIBLE'), (10, '1B', 'DISPONIBLE'), (10, '1C', 'DISPONIBLE');
+
 -- Historial necesario para no reactivar tokens antiguos después de liberar/rebloquear.
 CREATE TABLE IF NOT EXISTS retenciones (
     token UUID PRIMARY KEY,

@@ -7,6 +7,7 @@ import com.empresa.usuarios.publisher.UsuarioProducer;
 import com.empresa.usuarios.repository.UsuarioRepository;
 import com.empresa.usuarios.security.JwtUtils;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
@@ -48,11 +49,12 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest request) {
-        Usuario usuario = usuarioRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new RuntimeException("Credenciales inválidas"));
+        // Credenciales invalidas -> 401 (no 500): un RuntimeException sin
+        // handler acaba en /error y el cliente no distingue el motivo real.
+        Usuario usuario = usuarioRepository.findByEmail(request.getEmail()).orElse(null);
 
-        if (!passwordEncoder.matches(request.getPassword(), usuario.getPassword())) {
-            return ResponseEntity.badRequest().body("Credenciales inválidas");
+        if (usuario == null || !passwordEncoder.matches(request.getPassword(), usuario.getPassword())) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Credenciales inválidas");
         }
 
         String token = jwtUtils.generateToken(usuario.getId(), usuario.getEmail(), usuario.getRol());
