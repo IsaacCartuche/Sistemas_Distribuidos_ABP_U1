@@ -87,4 +87,40 @@ class OutboxProcesamientoServiceTest {
                                 any(UUID.class),
                                 any());
         }
+
+        @Test
+        void debeContinuarProcesandoSiPostgreSQLFallaEnUnEvento() {
+
+                OutboxEvento evento1 = new OutboxEvento();
+                evento1.setId(UUID.randomUUID());
+
+                OutboxEvento evento2 = new OutboxEvento();
+                evento2.setId(UUID.randomUUID());
+
+                when(reclamacionService.reclamarPendientes(any(UUID.class)))
+                                .thenReturn(List.of(evento1, evento2));
+
+                when(publisher.publicar(evento1)).thenReturn(true);
+                when(publisher.publicar(evento2)).thenReturn(true);
+
+                when(repository.marcarPublicado(
+                                eq(evento1.getId()),
+                                any(UUID.class),
+                                any())).thenThrow(new RuntimeException("PostgreSQL no disponible"));
+
+                when(repository.marcarPublicado(
+                                eq(evento2.getId()),
+                                any(UUID.class),
+                                any())).thenReturn(1);
+
+                service.procesarPendientes();
+
+                verify(publisher).publicar(evento1);
+                verify(publisher).publicar(evento2);
+
+                verify(repository).marcarPublicado(
+                                eq(evento2.getId()),
+                                any(UUID.class),
+                                any());
+        }
 }
