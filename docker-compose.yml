@@ -32,6 +32,7 @@ services:
     volumes:
       - pg_vuelos:/var/lib/postgresql/data
       - ./servicios/vuelos/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./servicios/vuelos/sql/migracion-version-outbox.sql:/docker-entrypoint-initdb.d/02-vuelos-outbox.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d db_vuelos"]
       interval: 30s
@@ -50,6 +51,9 @@ services:
     volumes:
       - pg_reservas:/var/lib/postgresql/data
       - ./servicios/reservas/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./servicios/reservas/sql/migrations/V1__agregar_campos_saga.sql:/docker-entrypoint-initdb.d/02-reservas-v1.sql:ro
+      - ./servicios/reservas/sql/migrations/V2__crear_tabla_outbox_eventos.sql:/docker-entrypoint-initdb.d/03-reservas-v2.sql:ro
+      - ./servicios/reservas/sql/migrations/V3__agregar_control_publicacion_outbox.sql:/docker-entrypoint-initdb.d/04-reservas-v3.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d db_reservas"]
       interval: 30s
@@ -104,6 +108,11 @@ services:
     volumes:
       - pg_inventario:/var/lib/postgresql/data
       - ./servicios/inventario-asientos/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./servicios/inventario-asientos/sql/migracion-inbox-reservas.sql:/docker-entrypoint-initdb.d/02-inventario-inbox.sql:ro
+      - ./servicios/inventario-asientos/sql/migracion-outbox-validacion.sql:/docker-entrypoint-initdb.d/03-inventario-outbox-validacion.sql:ro
+      - ./servicios/inventario-asientos/sql/migracion-outbox.sql:/docker-entrypoint-initdb.d/04-inventario-outbox.sql:ro
+      - ./servicios/inventario-asientos/sql/migracion-retenciones.sql:/docker-entrypoint-initdb.d/05-inventario-retenciones.sql:ro
+      - ./servicios/inventario-asientos/sql/migracion-saga-inventario.sql:/docker-entrypoint-initdb.d/06-inventario-saga.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d db_inventario"]
       interval: 30s
@@ -323,11 +332,6 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
 
   # ============================================================
   # WEBSOCKET (perfil: ws)
