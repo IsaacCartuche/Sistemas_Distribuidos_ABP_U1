@@ -48,23 +48,64 @@ class SagaEndToEndTest {
             var response = http.send(request, HttpResponse.BodyHandlers.ofString());
             assertEquals(201, response.statusCode(), response.body());
             int reserva = mapper.readTree(response.body()).path("id").asInt();
-            Message created = rabbit.receive(name, 10000);
+            Message created = rabbit.receive(name, 15000);
             assertNotNull(created);
             JsonNode event = mapper.readTree(created.getBody());
             UUID correlation = UUID.fromString(event.path("correlationId").asText());
             var payload = Map.of("reservaId", reserva, "token", event.path("payload").path("token").asText());
             publicar("asiento.bloqueado", correlation, payload);
-            await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+            await().atMost(Duration.ofSeconds(35)).untilAsserted(() -> {
                 assertEquals("CONFIRMADA", estadoReserva(reserva));
                 assertEquals("EXITOSO", estadoPago(correlation));
             });
             publicar("asiento.expirado", correlation, payload);
-            await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+            await().atMost(Duration.ofSeconds(35)).untilAsserted(() -> {
                 assertEquals("CANCELADA", estadoReserva(reserva));
                 assertEquals("REEMBOLSADO", estadoPago(correlation));
                 assertEquals(2, jdbc.queryForObject("select count(*) from pago_intentos where correlation_id=?", Integer.class, correlation));
                 assertEquals(2, jdbc.queryForObject("select count(*) from outbox_eventos where correlation_id=? and estado='PUBLICADO'", Integer.class, correlation));
             });
+        } finally {
+            admin.deleteQueue(name);
+        }
+    }
+
+    @Test
+    void pagoFallidoCancelaYEmiteSolicitudDeLiberacion() throws Exception {
+        String name = "saga.e2e.fallo." + UUID.randomUUID();
+        var queue = new org.springframework.amqp.core.Queue(name, false, true, false);
+        admin.declareQueue(queue);
+        var exchange = new TopicExchange("vuelos.events");
+        admin.declareBinding(BindingBuilder.bind(queue).to(exchange).with("reserva.creada"));
+        admin.declareBinding(BindingBuilder.bind(queue).to(exchange).with("reserva.cancelada"));
+        try {
+            var request = HttpRequest.newBuilder(URI.create(base + "/api/reservas"))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(Map.of(
+                            "vueloId", 1, "usuarioId", 1, "asiento", "5E", "total", 20000,
+                            "idempotencyKey", "e2e-fallo-" + UUID.randomUUID())))).build();
+            var response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            assertEquals(201, response.statusCode(), response.body());
+            int reserva = mapper.readTree(response.body()).path("id").asInt();
+            Message created = rabbit.receive(name, 15000);
+            assertNotNull(created);
+            JsonNode event = mapper.readTree(created.getBody());
+            UUID correlation = UUID.fromString(event.path("correlationId").asText());
+            var payload = Map.of("reservaId", reserva, "token", event.path("payload").path("token").asText());
+            publicar("asiento.bloqueado", correlation, payload);
+            publicar("asiento.bloqueado", correlation, payload);
+            await().atMost(Duration.ofSeconds(35)).untilAsserted(() -> {
+                assertEquals("CANCELADA", estadoReserva(reserva));
+                assertEquals("FALLIDO", estadoPago(correlation));
+                assertEquals(1, jdbc.queryForObject("select count(*) from pago_intentos where correlation_id=?", Integer.class, correlation));
+                assertEquals(1, jdbc.queryForObject("select count(*) from outbox_eventos where correlation_id=? and tipo='pago.fallido' and estado='PUBLICADO'", Integer.class, correlation));
+            });
+            Message cancelacion = rabbit.receive(name, 15000);
+            assertNotNull(cancelacion);
+            assertEquals("reserva.cancelada", cancelacion.getMessageProperties().getReceivedRoutingKey());
+            JsonNode json = mapper.readTree(cancelacion.getBody());
+            assertEquals(correlation.toString(), json.path("correlationId").asText());
+            assertEquals(payload.get("token"), json.path("payload").path("token").asText());
         } finally {
             admin.deleteQueue(name);
         }

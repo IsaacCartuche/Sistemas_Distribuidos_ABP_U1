@@ -9,7 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public class SagaListener {
  private final ObjectMapper mapper; private final SagaService service;
  public SagaListener(ObjectMapper mapper,SagaService service){this.mapper=mapper;this.service=service;}
- @RabbitListener(queues="reservas.saga.v1",containerFactory="sagaListenerFactory")
+ @RabbitListener(queues="#{@sagaColas}",containerFactory="sagaListenerFactory")
  public void recibir(Message m) throws java.io.IOException {
   service.procesar(m.getMessageProperties().getReceivedRoutingKey(), mapper.readValue(m.getBody(),EventoSaga.class));
  }

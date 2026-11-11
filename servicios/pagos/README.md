@@ -85,3 +85,15 @@ Ver [pruebas reproducibles](PRUEBAS.md). Incluyen eventos duplicados y fuera de 
 La prueba E2E usa Reservas real, Pagos, PostgreSQL y RabbitMQ, y emite señales sintéticas de Inventario. No valida compatibilidad con una implementación real de Inventario.
 
 Monitorizar pendientes e intentos en `outbox_eventos`, filas en `pago_intentos`, logs y `pagos.saga.dlq`. El reenvío de DLQ es manual tras corregir la causa y debe preservar `eventId` y routing key original. No hay purga/retención automática ni monitorización productiva implementada. Los acuerdos externos pendientes están detallados en el contrato propuesto.
+
+## Revisión de la guía del jefe: modo de colas canónicas
+
+La guía asigna resultados `pago.*` a `pagos.media` para **Reservas** y expiraciones a `reservas.alta`. La constitución describe `pagos.media` como entrada de Pagos; no son asignaciones equivalentes. Para conservar el comportamiento existente, Reservas admite `SAGA_TOPOLOGIA=aislada` (predeterminado) o `guia` cuando `SAGA_HABILITADA=true`.
+
+En `guia`, Reservas consume `pagos.media` (`pago.exitoso`, `pago.fallido`, `pago.reembolsado`) y `reservas.alta` (las cuatro señales `asiento.*` ya soportadas). Este modo declara **bindings**, pero no declara ni cambia los argumentos de esas dos colas. Deben existir previamente y tener DLX/política hacia `dlq.reservas` con clave `reservas.saga`. Su ausencia impide el arranque del listener. El modo aislado mantiene `reservas.saga.v1` con su topología original. No se arrancan ambos modos a la vez.
+
+Pagos conserva `pagos.saga.v1` como entrada de creación/bloqueo/cancelación. No debe consumir `pagos.media` simultáneamente con Reservas: consumidores de servicios distintos sobre una cola competirían por cada mensaje en vez de recibir una copia por servicio. Acordar esta distribución con Isaac y Cristian antes de habilitar `guia` en el broker compartido. La selección es una opción de despliegue probada en aislamiento, **no un acuerdo externo ya aprobado**.
+
+Los bindings de `notificaciones.entrada` e `inventario.entrada` pertenecen a sus responsables; estos servicios no los declaran en producción. Las nuevas pruebas provisionan dobles de esas colas exclusivamente en un broker aislado y comprueban enrutamiento, mensajes persistentes, correlación y compensación solicitada. El ACK de un mensaje mandatory garantiza al menos una ruta, no que todos los destinatarios esperados existan.
+
+La matriz actualizada y los requisitos exactos para cada integrante están en [REVISION_GUIA_JEFE.md](../reservas/REVISION_GUIA_JEFE.md). El informe de implementación previo se conserva como antecedente.

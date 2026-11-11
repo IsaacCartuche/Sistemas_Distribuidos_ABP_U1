@@ -23,6 +23,7 @@ server:
   port: 8082
 
 saga:
+  topologia: ${SAGA_TOPOLOGIA:aislada}
   habilitada: ${SAGA_HABILITADA:false}
 outbox:
   publicacion:

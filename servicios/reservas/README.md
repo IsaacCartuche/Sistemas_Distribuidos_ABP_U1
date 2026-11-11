@@ -81,3 +81,33 @@ Se verifican solicitudes repetidas y conflictivas, concurrencia, rollback reserv
 Revisar `outbox_eventos` pendientes/intentos/fecha de reclamo, las DLQ y los logs. Tras corregir el motivo de un fallo, reenviar desde DLQ preservando cuerpo, `eventId` y routing key original de `x-death`. No reenviar a ciegas; un fallo persistente volverá a DLQ. No se implementó retención/purga de Inbox y Outbox ni alertas automáticas.
 
 La ruta integral con Inventario y el compose raíz no están validados. Las pruebas E2E sustituyen explícitamente a Inventario mediante eventos sintéticos. El soporte de prioridad y DLQ se declara en colas propias, pendiente de migración a las colas canónicas. Las colas clásicas y su dead-lettering estándar no garantizan por sí solos durabilidad absoluta ante fallos internos del broker; una operación más exigente necesita acordar políticas/quorum y monitorización con infraestructura.
+
+## Revisión de la guía del jefe: modo de colas canónicas
+
+La guía asigna resultados `pago.*` a `pagos.media` para **Reservas** y expiraciones a `reservas.alta`. La constitución describe `pagos.media` como entrada de Pagos; no son asignaciones equivalentes. Para conservar el comportamiento existente, Reservas admite `SAGA_TOPOLOGIA=aislada` (predeterminado) o `guia` cuando `SAGA_HABILITADA=true`.
+
+En `guia`, Reservas consume `pagos.media` (`pago.exitoso`, `pago.fallido`, `pago.reembolsado`) y `reservas.alta` (las cuatro señales `asiento.*` ya soportadas). Este modo declara **bindings**, pero no declara ni cambia los argumentos de esas dos colas. Deben existir previamente y tener DLX/política hacia `dlq.reservas` con clave `reservas.saga`. Su ausencia impide el arranque del listener. El modo aislado mantiene `reservas.saga.v1` con su topología original. No se arrancan ambos modos a la vez.
+
+Pagos conserva `pagos.saga.v1` como entrada de creación/bloqueo/cancelación. No debe consumir `pagos.media` simultáneamente con Reservas: consumidores de servicios distintos sobre una cola competirían por cada mensaje en vez de recibir una copia por servicio. Acordar esta distribución con Isaac y Cristian antes de habilitar `guia` en el broker compartido. La selección es una opción de despliegue probada en aislamiento, **no un acuerdo externo ya aprobado**.
+
+Los bindings de `notificaciones.entrada` e `inventario.entrada` pertenecen a sus responsables; estos servicios no los declaran en producción. Las nuevas pruebas provisionan dobles de esas colas exclusivamente en un broker aislado y comprueban enrutamiento, mensajes persistentes, correlación y compensación solicitada. El ACK de un mensaje mandatory garantiza al menos una ruta, no que todos los destinatarios esperados existan.
+
+La matriz actualizada y los requisitos exactos para cada integrante están en [REVISION_GUIA_JEFE.md](../reservas/REVISION_GUIA_JEFE.md). El informe de implementación previo se conserva como antecedente.
+
+### Aplicar las migraciones existentes de Reservas
+
+`sql/migrar.sh` reutiliza V1–V4; no copia ni reinventa sus sentencias. Ejecuta una transacción local con bloqueo asesor y `ON_ERROR_STOP`. Requiere que la tabla base `public.reservas` ya exista. Las migraciones actuales son idempotentes y pueden reaplicarse. No hay historial/checksums de Flyway: revisar antes de añadir migraciones futuras no idempotentes.
+
+```bash
+# Cliente psql en el host; ajustar las variables a la base elegida.
+PGHOST=127.0.0.1 PGPORT=5442 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=db_reservas \
+  sh servicios/reservas/sql/migrar.sh
+
+# Cliente psql dentro de PostgreSQL del compose compartido, sin montar nuevas rutas.
+sh servicios/reservas/sql/migrar.sh --emitir-sql | \
+  docker compose exec -T postgres-reservas psql -X -v ON_ERROR_STOP=1 -U postgres -d db_reservas
+```
+
+Son comandos de despliegue que modifican el esquema elegido: no se ejecutaron contra la base compartida durante esta revisión. `init.sql` solo inicializa volúmenes nuevos y ya incluye V1–V4; reiniciar PostgreSQL no migra un volumen existente. No borrar volúmenes para actualizar el esquema.
+
+El compose propio permite elegir puertos host mediante `SAGA_RESERVAS_DB_PORT`, `SAGA_PAGOS_DB_PORT`, `SAGA_RABBIT_PORT`, `SAGA_RABBIT_ADMIN_PORT`, `SAGA_RESERVAS_HTTP_PORT` y `SAGA_PAGOS_HTTP_PORT`, conservando todos los valores anteriores como predeterminados. Esto permite ejecutar proyectos de prueba independientes con `docker compose -p <nombre>`.

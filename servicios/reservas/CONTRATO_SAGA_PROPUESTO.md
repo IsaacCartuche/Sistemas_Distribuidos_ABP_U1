@@ -43,7 +43,7 @@ Para evitar `PRECONDITION_FAILED` al redeclarar colas compartidas con argumentos
 
 Ambas son durables y usan DLX topic durable `dlq.reservas`, routing keys `reservas.saga`/`pagos.saga` y colas durables `reservas.saga.dlq`/`pagos.saga.dlq`. Hay cuatro intentos totales con espera exponencial de 200, 400 y 800 ms. El mensaje se confirma solo tras terminar la transacción. Tras agotar intentos se rechaza sin requeue y el broker lo envía a DLQ. No hay bucle de reenvío automático desde DLQ. Las colas soportan prioridades, pero esta implementación no asigna prioridades de negocio a los mensajes salientes.
 
-`SAGA_HABILITADA=false` impide declarar esa topología y arrancar los consumidores; la creación REST y el Outbox siguen disponibles. Habilitar con `SAGA_HABILITADA=true` únicamente en pruebas aisladas o tras acordar este contrato. Las colas `reservas.alta` y `pagos.media` siguen pendientes de integración con Isaac; no se consumen simultáneamente para evitar copias independientes y configuraciones incompatibles.
+`SAGA_HABILITADA=false` impide declarar esa topología y arrancar los consumidores; la creación REST y el Outbox siguen disponibles. Habilitar con `SAGA_HABILITADA=true` únicamente en pruebas aisladas o tras acordar este contrato. El modo aislado no consume las colas canónicas. El modo guía opcional descrito al final sí consume `reservas.alta` y `pagos.media`, después de su aprovisionamiento coordinado con Isaac; no se activan ambos modos simultáneamente.
 
 ## Acuerdos necesarios
 
@@ -54,3 +54,15 @@ Ambas son durables y usan DLX topic durable `dlq.reservas`, routing keys `reserv
 - **Isabel/Isaac:** integrar rutas/autorización y consumidores de confirmaciones/notificaciones. Sin un binding de destino, el Outbox conserva el evento pendiente por devolución mandatory.
 
 No se contactó a otros integrantes ni se modificaron sus archivos.
+
+## Revisión de la guía del jefe: modo de colas canónicas
+
+La guía asigna resultados `pago.*` a `pagos.media` para **Reservas** y expiraciones a `reservas.alta`. La constitución describe `pagos.media` como entrada de Pagos; no son asignaciones equivalentes. Para conservar el comportamiento existente, Reservas admite `SAGA_TOPOLOGIA=aislada` (predeterminado) o `guia` cuando `SAGA_HABILITADA=true`.
+
+En `guia`, Reservas consume `pagos.media` (`pago.exitoso`, `pago.fallido`, `pago.reembolsado`) y `reservas.alta` (las cuatro señales `asiento.*` ya soportadas). Este modo declara **bindings**, pero no declara ni cambia los argumentos de esas dos colas. Deben existir previamente y tener DLX/política hacia `dlq.reservas` con clave `reservas.saga`. Su ausencia impide el arranque del listener. El modo aislado mantiene `reservas.saga.v1` con su topología original. No se arrancan ambos modos a la vez.
+
+Pagos conserva `pagos.saga.v1` como entrada de creación/bloqueo/cancelación. No debe consumir `pagos.media` simultáneamente con Reservas: consumidores de servicios distintos sobre una cola competirían por cada mensaje en vez de recibir una copia por servicio. Acordar esta distribución con Isaac y Cristian antes de habilitar `guia` en el broker compartido. La selección es una opción de despliegue probada en aislamiento, **no un acuerdo externo ya aprobado**.
+
+Los bindings de `notificaciones.entrada` e `inventario.entrada` pertenecen a sus responsables; estos servicios no los declaran en producción. Las nuevas pruebas provisionan dobles de esas colas exclusivamente en un broker aislado y comprueban enrutamiento, mensajes persistentes, correlación y compensación solicitada. El ACK de un mensaje mandatory garantiza al menos una ruta, no que todos los destinatarios esperados existan.
+
+La matriz actualizada y los requisitos exactos para cada integrante están en [REVISION_GUIA_JEFE.md](../reservas/REVISION_GUIA_JEFE.md). El informe de implementación previo se conserva como antecedente.

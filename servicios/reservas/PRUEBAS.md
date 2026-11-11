@@ -95,3 +95,7 @@ POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=55443 POSTGRES_PASSWORD=postgres \
 ```
 
 `SAGA_E2E_CONSUMIDOR=false` desactiva consumidores y publicador del contexto de pruebas: el cobro, las transiciones, publicaciones y reembolso deben efectuarlos los contenedores. El contexto de prueba solo usa HTTP, publica las señales sintéticas de Inventario y consulta resultados. Este compose es también infraestructura exclusiva de ensayo; no es el compose compartido del equipo. Las credenciales incluidas son locales de desarrollo.
+
+## Revisión posterior de la guía
+
+Los resultados y recursos de la sesión anterior se conservan arriba como antecedente. La revisión actual añade pruebas de las colas canónicas, destinos de publicación y un segundo escenario E2E de pago rechazado. Las dos E2E se omiten en la suite normal y se ejecutan explícitamente contra Docker. Consultar la matriz, los comandos actuales y la evidencia de migración en [REVISION_GUIA_JEFE.md](../reservas/REVISION_GUIA_JEFE.md). No ejecutar las nuevas fixtures de colas contra el broker compartido.
