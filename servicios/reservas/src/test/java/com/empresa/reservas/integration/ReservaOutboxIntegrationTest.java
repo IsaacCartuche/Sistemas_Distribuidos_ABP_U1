@@ -4,12 +4,16 @@ import com.empresa.reservas.dto.CrearReservaRequest;
 import com.empresa.reservas.entity.Reserva;
 import com.empresa.reservas.repository.OutboxEventoRepository;
 import com.empresa.reservas.service.ReservaService;
+import com.empresa.reservas.repository.ReservaRepository;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -28,10 +32,37 @@ class ReservaOutboxIntegrationTest {
         @Autowired
         private ObjectMapper objectMapper;
 
+        @Autowired
+        private ReservaRepository reservaRepository;
+
+        @Autowired
+        private TransactionTemplate transactionTemplate;
+
+        private String clavePrueba;
+
+        @AfterEach
+        void limpiarDatosPrueba() {
+                if (clavePrueba == null) {
+                        return;
+                }
+
+                transactionTemplate.executeWithoutResult(status -> {
+                        reservaRepository.findByIdempotencyKey(clavePrueba)
+                                        .ifPresent(reserva -> {
+                                                outboxRepository.findByCorrelationId(
+                                                                reserva.getCorrelationId())
+                                                                .ifPresent(outboxRepository::delete);
+
+                                                reservaRepository.delete(reserva);
+                                        });
+                });
+        }
+
         @Test
         void crearReservaDebeGuardarEventoOutbox() throws Exception {
 
                 String clave = "outbox-test-" + UUID.randomUUID();
+                clavePrueba = clave;
 
                 CrearReservaRequest request = new CrearReservaRequest(
                                 15,
@@ -71,6 +102,7 @@ class ReservaOutboxIntegrationTest {
         void solicitudRepetidaNoDebeCrearOtroEventoOutbox() {
 
                 String clave = "outbox-idempotencia-" + UUID.randomUUID();
+                clavePrueba = clave;
 
                 CrearReservaRequest request = new CrearReservaRequest(
                                 15,

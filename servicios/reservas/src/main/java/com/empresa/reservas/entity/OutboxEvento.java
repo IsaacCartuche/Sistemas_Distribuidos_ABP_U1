@@ -1,3 +1,4 @@
+
 package com.empresa.reservas.entity;
 
 import jakarta.persistence.*;
@@ -37,6 +38,12 @@ public class OutboxEvento {
 
     @Column(nullable = false)
     private Integer intentos = 0;
+
+    @Column(name = "fecha_reclamo")
+    private LocalDateTime fechaReclamo;
+
+    @Column(name = "reclamado_por")
+    private UUID reclamadoPor;
 
     public OutboxEvento() {
     }
@@ -119,5 +126,21 @@ public class OutboxEvento {
 
     public void setIntentos(Integer intentos) {
         this.intentos = intentos;
+    }
+
+    public LocalDateTime getFechaReclamo() {
+        return fechaReclamo;
+    }
+
+    public void setFechaReclamo(LocalDateTime fechaReclamo) {
+        this.fechaReclamo = fechaReclamo;
+    }
+
+    public UUID getReclamadoPor() {
+        return reclamadoPor;
+    }
+
+    public void setReclamadoPor(UUID reclamadoPor) {
+        this.reclamadoPor = reclamadoPor;
     }
 }
