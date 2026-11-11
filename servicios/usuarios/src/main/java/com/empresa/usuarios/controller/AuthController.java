@@ -12,7 +12,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/usuarios")
+@RequestMapping({"/api/auth", "/api/usuarios"}) // Soporta /api/auth y mantiene compatibilidad con /api/usuarios
 @RequiredArgsConstructor
 public class AuthController {
 
@@ -21,7 +21,7 @@ public class AuthController {
     private final JwtUtils jwtUtils;
     private final UsuarioProducer usuarioProducer;
 
-    @PostMapping("/registro")
+    @PostMapping({"/registro", "/register"}) // Soporta ambos nombres de endpoint
     public ResponseEntity<?> registrar(@RequestBody RegistroRequest request) {
         if (usuarioRepository.existsByEmail(request.getEmail())) {
             return ResponseEntity.badRequest().body("El email ya se encuentra registrado.");

@@ -218,16 +218,17 @@ services:
       - services
       - all
     ports:
-      - "8084:8084"
+      - "${USUARIOS_PORT:-8084}:8084"
     environment:
-      POSTGRES_HOST: postgres-usuarios
-      POSTGRES_PORT: 5432
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres-usuarios}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
+      JWT_SECRET: ${JWT_SECRET}
       JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
     depends_on:
       postgres-usuarios:
@@ -300,13 +301,25 @@ services:
       - gateway
       - all
     ports:
-      - "8080:8080"
+      - "${GATEWAY_PORT:-8080}:8080"
     environment:
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
+      USUARIOS_HOST: ${USUARIOS_HOST:-servicio-usuarios}
+      VUELOS_HOST: ${VUELOS_HOST:-servicio-vuelos}
+      RESERVAS_HOST: ${RESERVAS_HOST:-servicio-reservas}
+      PAGOS_HOST: ${PAGOS_HOST:-servicio-pagos}
+      INVENTARIO_HOST: ${INVENTARIO_HOST:-servicio-inventario-asientos}
+      NOTIFICACIONES_HOST: ${NOTIFICACIONES_HOST:-servicio-notificaciones}
+      JWT_SECRET: ${JWT_SECRET}
       JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     depends_on:
       rabbitmq:
         condition: service_healthy

@@ -5,7 +5,8 @@ spring:
   application:
     name: servicio-usuarios
   datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:postgres-usuarios}:${POSTGRES_PORT:5432}/db_usuarios
+    # Se ajusta el fallback a localhost para permitir desarrollo local sin Docker (Punto 2.1)
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/db_usuarios
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
@@ -23,7 +24,7 @@ spring:
     password: ${RABBITMQ_PASS:guest}
 
 jwt:
-  secret: c3VwZXItc2VjcmV0LWtleS1wYXJhLWVsLXByb3llY3RvLWFicC11MS1kaXN0cmlidWlkb3M=
+  secret: ${JWT_SECRET}
   expiration-ms: 86400000
 
 app:
