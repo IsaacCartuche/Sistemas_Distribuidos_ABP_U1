@@ -1,0 +1,77 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Sistemas Distribuidos - Monitoreo",
+    "tags": ["distributed-systems", "rabbitmq", "microservices"],
+    "style": "dark",
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "15s",
+    "panels": [
+      {
+        "type": "stat",
+        "title": "Colas de RabbitMQ",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "rabbitmq_queue_messages{queue!=\"\"}",
+            "instant": true,
+            "legendFormat": "{{queue}}"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0}
+      },
+      {
+        "type": "graph",
+        "title": "Mensajes publicados en RabbitMQ",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "rate(rabbitmq_queue_messages_publish_total[1m])",
+            "legendFormat": "{{queue}}"
+          }
+        ],
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 4}
+      },
+      {
+        "type": "graph",
+        "title": "Mensajes consumidos en RabbitMQ",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "rate(rabbitmq_queue_messages_deliver_get_total[1m])",
+            "legendFormat": "{{queue}}"
+          }
+        ],
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 4}
+      },
+      {
+        "type": "stat",
+        "title": "Estado de Servicios",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "up",
+            "instant": true,
+            "legendFormat": "{{instance}}"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 12, "x": 0, "y": 10}
+      },
+      {
+        "type": "graph",
+        "title": "Latencia de Respuesta (synthetic probe)",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "probe_duration_seconds",
+            "legendFormat": "{{instance}}"
+          }
+        ],
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 10}
+      }
+    ],
+    "time": {"from": "now-1h", "to": "now"}
+  }
+}

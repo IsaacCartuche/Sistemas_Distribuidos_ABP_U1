@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -33,6 +34,10 @@ public class ReservaService {
 
     public Optional<Reserva> buscarPorId(Integer id) {
         return reservaRepository.findById(id);
+    }
+
+    public List<Reserva> buscarPorUsuario(Integer usuarioId) {
+        return reservaRepository.findByUsuarioId(usuarioId);
     }
 
     public Optional<Reserva> buscarPorIdempotencyKey(String clave) {

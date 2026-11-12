@@ -1,10 +1,148 @@
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #f5f5f5;
+  background: #f8fafc;
+  color: #0f172a;
 }
 #root {
   max-width: 900px;
   margin: 0 auto;
   padding: 1rem;
+  min-height: 100vh;
+}
+
+/* Tarjetas genéricas */
+.card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  margin-bottom: 1rem;
+}
+
+/* Botones */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  padding: 0.75rem 1.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-decoration: none;
+}
+.btn-primary {
+  background: #2563eb;
+  color: #ffffff;
+}
+.btn-primary:hover {
+  background: #1d4ed8;
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.btn-full {
+  width: 100%;
+}
+.btn-sm {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+}
+.btn-ghost {
+  background: transparent;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+.btn-ghost:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+/* Inputs */
+.input-group {
+  margin-bottom: 1rem;
+}
+.input-group label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 0.25rem;
+}
+.input {
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  background: #ffffff;
+  color: #111827;
+}
+.input:focus {
+  outline: none;
+  border-color: #2563eb;
+  ring: 2px;
+}
+
+/* Utilidades */
+.muted { color: #6b7280; font-size: 0.875rem; }
+.error { color: #dc2626; font-size: 0.875rem; margin-bottom: 0.5rem; }
+.ok { color: #059669; font-size: 0.875rem; margin-bottom: 0.5rem; }
+.fade-in { animation: fadeIn 0.3s ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+}
+.badge.success { background: #dcfce7; color: #166534; }
+.badge.danger { background: #fecaca; color: #991b1b; }
+.badge.warning { background: #fef3c7; color: #92400e; }
+
+.navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.nav-brand {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #2563eb;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.navbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.navbar-actions a {
+  text-decoration: none;
+  color: #111827;
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  transition: all 0.15s ease;
+}
+.navbar-actions a:hover {
+  background: #f1f5f9;
+  color: #2563eb;
 }

@@ -9,8 +9,8 @@ services:
       - "5672:5672"
       - "15672:15672"
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
       RABBITMQ_LOAD_DEFINITIONS: /etc/rabbitmq/definitions.json
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
@@ -169,8 +169,8 @@ services:
 
   servicio-reservas:
     build:
-      context: .
-      dockerfile: servicios/reservas/Dockerfile
+      context: ./servicios/reservas
+      dockerfile: Dockerfile
     container_name: servicio-reservas
     profiles:
       - services
@@ -366,6 +366,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:8080}
+        REACT_APP_WS_URL: ${REACT_APP_WS_URL:-ws://localhost:8090}
     container_name: frontend
     profiles:
       - frontend
@@ -373,11 +376,56 @@ services:
     ports:
       - "3000:3000"
     environment:
-      GATEWAY_HOST: ${GATEWAY_HOST:-localhost}
-      GATEWAY_PORT: ${GATEWAY_PORT:-8080}
+      REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:8080}
+      REACT_APP_WS_URL: ${REACT_APP_WS_URL:-ws://localhost:8090}
     depends_on:
       gateway:
         condition: service_healthy
+
+  # ============================================================
+  # MONITOREO EXTERNO (no modifica backend)
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    restart: unless-stopped
+
+  rabbitmq-exporter:
+    image: kbudde/rabbitmq-exporter:latest
+    container_name: rabbitmq-exporter
+    environment:
+      RABBITMQ_URL: http://rabbitmq:15672
+      RABBITMQ_USER: guest
+      RABBITMQ_PASSWORD: guest
+    ports:
+      - "9419:9419"
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: grafana-clock-panel
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_started
 
 volumes:
   rabbitmq_data:

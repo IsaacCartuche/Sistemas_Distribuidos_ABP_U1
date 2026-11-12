@@ -8,6 +8,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.HttpStatus;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
 @RestController
 @RequestMapping("/api/reservas")
 public class ReservaController {
@@ -26,6 +29,17 @@ public class ReservaController {
                 .map(ReservaResponse::desdeEntidad)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/usuario/{usuarioId}")
+    public ResponseEntity<List<ReservaResponse>> obtenerReservasPorUsuario(
+            @PathVariable Integer usuarioId) {
+
+        var reservas = reservaService.buscarPorUsuario(usuarioId)
+                .stream()
+                .map(ReservaResponse::desdeEntidad)
+                .collect(Collectors.toList());
+        return ResponseEntity.ok(reservas);
     }
 
     @PostMapping

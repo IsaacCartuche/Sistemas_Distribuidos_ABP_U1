@@ -60,6 +60,7 @@ export const reservasService = {
   // CrearReservaRequest: vueloId, usuarioId, asiento, total, idempotencyKey.
   crear: (reserva) => api.post('/api/reservas', reserva),
   obtener: (id) => api.get(`/api/reservas/${id}`),
+  obtenerPorUsuario: (usuarioId) => api.get(`/api/reservas/usuario/${usuarioId}`),
 };
 
 export const pagosService = {
