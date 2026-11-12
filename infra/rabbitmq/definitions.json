@@ -1,17 +1,63 @@
 {
+  "vhosts": [
+    {
+      "name": "/",
+      "metadata": {
+        "description": "Default virtual host",
+        "tags": []
+      },
+      "limits": []
+    }
+  ],
+  "users": [
+    {
+      "name": "guest",
+      "password_hash": "4vPbWVeu/Q5Wgi8bgvF2lz66KjcCo1+v2IpJ7jDs7xlB+WXw",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": ["administrator"],
+      "limits": {}
+    }
+  ],
+  "permissions": [
+    {
+      "user": "guest",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+  "topic_permissions": [],
+  "parameters": [],
+  "global_parameters": [],
+  "policies": [],
   "exchanges": [
-    { "name": "vuelos.events", "type": "topic", "durable": true }
+    { "name": "vuelos.events", "type": "topic", "durable": true, "vhost": "/", "internal": false, "arguments": {} },
+    { "name": "vuelos.dlx", "type": "topic", "durable": true, "vhost": "/", "internal": false, "arguments": {} }
   ],
   "queues": [
-    { "name": "reservas.alta", "durable": true, "arguments": {{ "x-max-priority": 10 }}},
-    { "name": "pagos.media", "durable": true, "arguments": {{ "x-max-priority": 5 }}},
-    { "name": "notificaciones.baja", "durable": true, "arguments": {{ "x-max-priority": 1 }}},
-    { "name": "dlq.reservas", "durable": true }
+    { "name": "inventario.entrada", "durable": true, "vhost": "/", "arguments": { "x-max-priority": 5, "x-dead-letter-exchange": "vuelos.dlx", "x-dead-letter-routing-key": "inventario.dlq" } },
+    { "name": "reservas.alta", "durable": true, "vhost": "/", "arguments": { "x-max-priority": 10, "x-dead-letter-exchange": "vuelos.dlx", "x-dead-letter-routing-key": "reserva.alta.dlq" } },
+    { "name": "pagos.media", "durable": true, "vhost": "/", "arguments": { "x-max-priority": 5, "x-dead-letter-exchange": "vuelos.dlx", "x-dead-letter-routing-key": "pago.media.dlq" } },
+    { "name": "notificaciones.entrada", "durable": true, "vhost": "/", "arguments": { "x-max-priority": 5, "x-dead-letter-exchange": "vuelos.dlx", "x-dead-letter-routing-key": "notificacion.entrada.dlq" } },
+    { "name": "notificaciones.baja", "durable": true, "vhost": "/", "arguments": { "x-max-priority": 1, "x-dead-letter-exchange": "vuelos.dlx", "x-dead-letter-routing-key": "notificacion.baja.dlq" } },
+    { "name": "dlq.reservas", "durable": true, "vhost": "/", "arguments": {} }
   ],
   "bindings": [
-    { "source": "vuelos.events", "destination": "reservas.alta", "routing_key": "reserva.alta" },
-    { "source": "vuelos.events", "destination": "pagos.media", "routing_key": "pago.media" },
-    { "source": "vuelos.events", "destination": "notificaciones.baja", "routing_key": "notificacion.baja" },
-    { "source": "vuelos.events", "destination": "dlq.reservas", "routing_key": "reserva.dlq" }
+    { "source": "vuelos.events", "destination": "inventario.entrada", "routing_key": "reserva.creada", "destination_type": "queue", "vhost": "/", "arguments": {} },
+    { "source": "vuelos.events", "destination": "inventario.entrada", "routing_key": "reserva.cancelada", "destination_type": "queue", "vhost": "/", "arguments": {} },
+    { "source": "vuelos.events", "destination": "reservas.alta", "routing_key": "asiento.expirado", "destination_type": "queue", "vhost": "/", "arguments": {} },
+    { "source": "vuelos.events", "destination": "pagos.media", "routing_key": "pago.exitoso", "destination_type": "queue", "vhost": "/", "arguments": {} },
+    { "source": "vuelos.events", "destination": "pagos.media", "routing_key": "pago.fallido", "destination_type": "queue", "vhost": "/", "arguments": {} },
+    { "source": "vuelos.events", "destination": "pagos.media", "routing_key": "pago.reembolsado", "destination_type": "queue", "vhost": "/", "arguments": {} },
+    { "source": "vuelos.events", "destination": "notificaciones.entrada", "routing_key": "reserva.creada", "destination_type": "queue", "vhost": "/", "arguments": {} },
+    { "source": "vuelos.events", "destination": "notificaciones.entrada", "routing_key": "reserva.cancelada", "destination_type": "queue", "vhost": "/", "arguments": {} },
+    { "source": "vuelos.events", "destination": "notificaciones.entrada", "routing_key": "reserva.confirmada", "destination_type": "queue", "vhost": "/", "arguments": {} },
+    { "source": "vuelos.events", "destination": "notificaciones.entrada", "routing_key": "pago.exitoso", "destination_type": "queue", "vhost": "/", "arguments": {} },
+    { "source": "vuelos.events", "destination": "notificaciones.entrada", "routing_key": "pago.fallido", "destination_type": "queue", "vhost": "/", "arguments": {} },
+    { "source": "vuelos.events", "destination": "notificaciones.entrada", "routing_key": "pago.reembolsado", "destination_type": "queue", "vhost": "/", "arguments": {} },
+    { "source": "vuelos.events", "destination": "notificaciones.baja", "routing_key": "notificacion.baja", "destination_type": "queue", "vhost": "/", "arguments": {} },
+    { "source": "vuelos.events", "destination": "notificaciones.baja", "routing_key": "usuario.registrado", "destination_type": "queue", "vhost": "/", "arguments": {} },
+    { "source": "vuelos.events", "destination": "dlq.reservas", "routing_key": "*.dlq", "destination_type": "queue", "vhost": "/", "arguments": {} }
   ]
 }

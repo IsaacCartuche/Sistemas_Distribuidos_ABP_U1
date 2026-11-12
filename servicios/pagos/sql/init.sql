@@ -3,15 +3,26 @@
 
 CREATE TABLE IF NOT EXISTS pagos (
     id SERIAL PRIMARY KEY,
-    reserva_id INTEGER NOT NULL,
+    reserva_id BIGINT NOT NULL,
     monto DECIMAL(10,2) NOT NULL,
-    estado VARCHAR(20) DEFAULT 'PENDIENTE',
-    metodo_pago VARCHAR(50),
-    transaccion_externa VARCHAR(100),
-    fecha_procesamiento TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metodo_pago VARCHAR(50) NOT NULL,
+    estado VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',
     idempotency_key VARCHAR(100) UNIQUE,
-    version INTEGER DEFAULT 0
+    transaccion_id VARCHAR(50),
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_pagos_estado ON pagos(estado);
-CREATE INDEX IF NOT EXISTS idx_pagos_reserva ON pagos(reserva_id);
+-- Agregar columna fecha_actualizacion si no existe (para tablas creadas con schema anterior)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'pagos' AND column_name = 'fecha_actualizacion'
+    ) THEN
+        ALTER TABLE pagos ADD COLUMN fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_pagos_reserva_id ON pagos(reserva_id);
+CREATE INDEX IF NOT EXISTS idx_pagos_idempotency_key ON pagos(idempotency_key);

@@ -1,0 +1,7 @@
+**
+!servicios
+!servicios/inventario-asientos
+!servicios/inventario-asientos/pom.xml
+!servicios/inventario-asientos/src
+!servicios/inventario-asientos/src/**
+!servicios/inventario-asientos/docker-entrypoint.sh

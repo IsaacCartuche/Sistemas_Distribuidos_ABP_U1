@@ -1,0 +1,7 @@
+**
+!servicios
+!servicios/vuelos
+!servicios/vuelos/pom.xml
+!servicios/vuelos/src
+!servicios/vuelos/src/**
+!servicios/vuelos/docker-entrypoint.sh

@@ -1,15 +1,93 @@
+server:
+  port: 8080
+
 spring:
   application:
     name: api-gateway
-  datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/db_gateway
-    username: ${POSTGRES_USER:postgres}
-    password: ${POSTGRES_PASSWORD:postgres}
-  rabbitmq:
-    host: ${RABBITMQ_HOST:localhost}
-    port: ${RABBITMQ_PORT:5672}
-    username: ${RABBITMQ_USER:guest}
-    password: ${RABBITMQ_PASS:guest}
+  cloud:
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins:
+              - "http://localhost:3000"
+              - "http://localhost:80"
+              - "http://192.168.10.146:3000"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - OPTIONS
+              - PATCH
+            allowedHeaders:
+              - "*"
+            allowCredentials: true
+      routes:
+        # 0. Ruta para manejar preflight CORS (OPTIONS) - debe ir ANTES que las demás
+        - id: cors-preflight
+          uri: "no://op"  # No forward to any backend
+          predicates:
+            - Method=OPTIONS
+          filters:
+            - RemoveRequestHeader=Content-Length
+            - SetResponseHeader=Access-Control-Allow-Origin, http://localhost:3000
+            - SetResponseHeader=Access-Control-Allow-Methods, GET,POST,PUT,DELETE,OPTIONS,PATCH
+            - SetResponseHeader=Access-Control-Allow-Headers, *
+            - SetResponseHeader=Access-Control-Allow-Credentials, true
+            - SetResponseHeader=Access-Control-Max-Age, 3600
+            - SetStatus=200
 
-server:
-  port: 8080
+        # 1. Ruta de Autenticación para el Frontend (/api/auth/login, /api/auth/register)
+        - id: servicio-usuarios-auth
+          uri: http://${USUARIOS_HOST:servicio-usuarios}:8084
+          predicates:
+            - Path=/api/auth/**
+
+        # 2. Rutas del microservicio de Usuarios
+        - id: servicio-usuarios
+          uri: http://${USUARIOS_HOST:servicio-usuarios}:8084
+          predicates:
+            - Path=/api/usuarios/**
+
+        # 3. Rutas de Cristian (Vuelos)
+        - id: servicio-vuelos
+          uri: http://${VUELOS_HOST:servicio-vuelos}:8081
+          predicates:
+            - Path=/api/vuelos/**
+
+        # 4. Rutas de Sebastian (Reservas)
+        - id: servicio-reservas
+          uri: http://${RESERVAS_HOST:servicio-reservas}:8082
+          predicates:
+            - Path=/api/reservas/**
+
+        # 5. Rutas de Sebastian (Pagos)
+        - id: servicio-pagos
+          uri: http://${PAGOS_HOST:servicio-pagos}:8083
+          predicates:
+            - Path=/api/pagos/**
+
+        # 6. Rutas de Cristian (Inventario de Asientos)
+        - id: servicio-inventario-asientos
+          uri: http://${INVENTARIO_HOST:servicio-inventario-asientos}:8085
+          predicates:
+            - Path=/api/inventario/**
+
+        # 7. Rutas de Isaac (Notificaciones)
+        - id: servicio-notificaciones
+          uri: http://${NOTIFICACIONES_HOST:servicio-notificaciones}:8086
+          predicates:
+            - Path=/api/notificaciones/**
+          filters:
+            - StripPrefix=1
+
+jwt:
+  secret: ${JWT_SECRET}
+
+# Endpoints de Actuator para el Healthcheck de Docker
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

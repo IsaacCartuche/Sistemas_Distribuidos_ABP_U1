@@ -9,8 +9,9 @@ services:
       - "5672:5672"
       - "15672:15672"
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+      RABBITMQ_LOAD_DEFINITIONS: /etc/rabbitmq/definitions.json
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
       - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
@@ -32,6 +33,7 @@ services:
     volumes:
       - pg_vuelos:/var/lib/postgresql/data
       - ./servicios/vuelos/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./servicios/vuelos/sql/migracion-version-outbox.sql:/docker-entrypoint-initdb.d/02-vuelos-outbox.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d db_vuelos"]
       interval: 30s
@@ -50,6 +52,9 @@ services:
     volumes:
       - pg_reservas:/var/lib/postgresql/data
       - ./servicios/reservas/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./servicios/reservas/sql/migrations/V1__agregar_campos_saga.sql:/docker-entrypoint-initdb.d/02-reservas-v1.sql:ro
+      - ./servicios/reservas/sql/migrations/V2__crear_tabla_outbox_eventos.sql:/docker-entrypoint-initdb.d/03-reservas-v2.sql:ro
+      - ./servicios/reservas/sql/migrations/V3__agregar_control_publicacion_outbox.sql:/docker-entrypoint-initdb.d/04-reservas-v3.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d db_reservas"]
       interval: 30s
@@ -104,6 +109,11 @@ services:
     volumes:
       - pg_inventario:/var/lib/postgresql/data
       - ./servicios/inventario-asientos/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./servicios/inventario-asientos/sql/migracion-inbox-reservas.sql:/docker-entrypoint-initdb.d/02-inventario-inbox.sql:ro
+      - ./servicios/inventario-asientos/sql/migracion-outbox-validacion.sql:/docker-entrypoint-initdb.d/03-inventario-outbox-validacion.sql:ro
+      - ./servicios/inventario-asientos/sql/migracion-outbox.sql:/docker-entrypoint-initdb.d/04-inventario-outbox.sql:ro
+      - ./servicios/inventario-asientos/sql/migracion-retenciones.sql:/docker-entrypoint-initdb.d/05-inventario-retenciones.sql:ro
+      - ./servicios/inventario-asientos/sql/migracion-saga-inventario.sql:/docker-entrypoint-initdb.d/06-inventario-saga.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d db_inventario"]
       interval: 30s
@@ -142,15 +152,15 @@ services:
     ports:
       - "8081:8081"
     environment:
-      POSTGRES_HOST: ${POSTGRES_HOST:-localhost}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_HOST: postgres-vuelos
+      POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
-      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
     depends_on:
       postgres-vuelos:
         condition: service_healthy
@@ -159,8 +169,8 @@ services:
 
   servicio-reservas:
     build:
-      context: .
-      dockerfile: servicios/reservas/Dockerfile
+      context: ./servicios/reservas
+      dockerfile: Dockerfile
     container_name: servicio-reservas
     profiles:
       - services
@@ -168,15 +178,15 @@ services:
     ports:
       - "8082:8082"
     environment:
-      POSTGRES_HOST: ${POSTGRES_HOST:-localhost}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_HOST: postgres-reservas
+      POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
-      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
     depends_on:
       postgres-reservas:
         condition: service_healthy
@@ -194,15 +204,15 @@ services:
     ports:
       - "8083:8083"
     environment:
-      POSTGRES_HOST: ${POSTGRES_HOST:-localhost}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_HOST: postgres-pagos
+      POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
-      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
     depends_on:
       postgres-pagos:
         condition: service_healthy
@@ -218,17 +228,18 @@ services:
       - services
       - all
     ports:
-      - "8084:8084"
+      - "${USUARIOS_PORT:-8084}:8084"
     environment:
-      POSTGRES_HOST: ${POSTGRES_HOST:-localhost}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres-usuarios}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
       RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      JWT_SECRET: ${JWT_SECRET}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
     depends_on:
       postgres-usuarios:
         condition: service_healthy
@@ -246,15 +257,16 @@ services:
     ports:
       - "8085:8085"
     environment:
-      POSTGRES_HOST: ${POSTGRES_HOST:-localhost}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_HOST: postgres-inventario
+      POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
-      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
+      INVENTARIO_CONSUMIDOR_HABILITADO: "true"
     depends_on:
       postgres-inventario:
         condition: service_healthy
@@ -272,15 +284,15 @@ services:
     ports:
       - "8086:8086"
     environment:
-      POSTGRES_HOST: ${POSTGRES_HOST:-localhost}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_HOST: postgres-notificaciones
+      POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
-      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
     depends_on:
       postgres-notificaciones:
         condition: service_healthy
@@ -299,13 +311,27 @@ services:
       - gateway
       - all
     ports:
-      - "8080:8080"
+      - "${GATEWAY_PORT:-8080}:8080"
     environment:
-      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
       RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      USUARIOS_HOST: ${USUARIOS_HOST:-servicio-usuarios}
+      VUELOS_HOST: ${VUELOS_HOST:-servicio-vuelos}
+      RESERVAS_HOST: ${RESERVAS_HOST:-servicio-reservas}
+      PAGOS_HOST: ${PAGOS_HOST:-servicio-pagos}
+      INVENTARIO_HOST: ${INVENTARIO_HOST:-servicio-inventario-asientos}
+      NOTIFICACIONES_HOST: ${NOTIFICACIONES_HOST:-servicio-notificaciones}
+      JWT_SECRET: ${JWT_SECRET}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
+    healthcheck:
+      # La imagen eclipse-temurin:17-jre-alpine no trae curl; busybox wget si.
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -324,11 +350,11 @@ services:
     ports:
       - "8090:8090"
     environment:
-      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
-      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
-      JAVA_OPTS: ${JAVA_OPTS:-Xmx512m -Xms256m}
+      JAVA_OPTS: ${JAVA_OPTS:--Xmx512m -Xms256m}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -338,8 +364,11 @@ services:
   # ============================================================
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:8080}
+        REACT_APP_WS_URL: ${REACT_APP_WS_URL:-ws://localhost:8090}
     container_name: frontend
     profiles:
       - frontend
@@ -347,10 +376,55 @@ services:
     ports:
       - "3000:3000"
     environment:
-      GATEWAY_HOST: ${GATEWAY_HOST:-localhost}
-      GATEWAY_PORT: ${GATEWAY_PORT:-8080}
+      REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:8080}
+      REACT_APP_WS_URL: ${REACT_APP_WS_URL:-ws://localhost:8090}
     depends_on:
       gateway:
+        condition: service_healthy
+
+  # ============================================================
+  # MONITOREO EXTERNO (no modifica backend)
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    restart: unless-stopped
+
+  rabbitmq-exporter:
+    image: kbudde/rabbitmq-exporter:latest
+    container_name: rabbitmq-exporter
+    environment:
+      RABBITMQ_URL: http://rabbitmq:15672
+      RABBITMQ_USER: guest
+      RABBITMQ_PASSWORD: guest
+    ports:
+      - "9419:9419"
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: grafana-clock-panel
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    restart: unless-stopped
+    depends_on:
+      prometheus:
         condition: service_started
 
 volumes:

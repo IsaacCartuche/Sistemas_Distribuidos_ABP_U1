@@ -1,5 +1,11 @@
+FROM maven:3.9-eclipse-temurin-17 AS build
+WORKDIR /app
+COPY servicios/pagos/pom.xml ./pom.xml
+COPY servicios/pagos/src ./src
+RUN mvn clean package -DskipTests -q
+
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
-COPY target/*.jar app.jar
-EXPOSE 8080
+COPY --from=build /app/target/*.jar app.jar
+EXPOSE 8083
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]
