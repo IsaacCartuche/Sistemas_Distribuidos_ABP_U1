@@ -1,42 +1,37 @@
 # Sistemas Distribuidos - ABP U1
-Plataforma de Reservas de Vuelos - Arquitectura de Microservicios
+Plataforma de reservas de vuelos basada en microservicios.
 
 ## Servicios
-| Carpeta | Servicio | Puerto | Tecnología |
-|---------|----------|--------|------------|
-| `gateway/` | API Gateway | 8080 | Spring Cloud Gateway |
-| `websocket-server/` | WebSocket tiempo real | 8090 | Spring Boot WebSocket |
-| `frontend/` | Interfaz web | 3000 | React |
-| `servicios/vuelos/` | Catálogo de vuelos | 8081 | Java + Spring Boot |
-| `servicios/reservas/` | Reservas y Saga | 8082 | Java + Spring Boot |
-| `servicios/pagos/` | Procesamiento de pagos | 8083 | Java + Spring Boot |
-| `servicios/usuarios/` | Auth, JWT y perfiles | 8084 | Java + Spring Boot |
-| `servicios/inventario-asientos/` | Disponibilidad de asientos | 8085 | Java + Spring Boot |
-| `servicios/notificaciones/` | Emails y eventos | 8086 | Java + Spring Boot |
+- API Gateway: puerto 8080
+- WebSocket tiempo real: puerto 8090
+- Frontend React: puerto 3000
+- Vuelos: puerto 8081
+- Reservas: puerto 8082
+- Pagos: puerto 8083
+- Usuarios: puerto 8084
+- Inventario de asientos: puerto 8085
+- Notificaciones: puerto 8086
+
+Cada microservicio tiene su propia base de datos PostgreSQL. La comunicacion entre servicios usa RabbitMQ.
+
+## Tecnologias
+Java 17, Spring Boot, Spring Cloud Gateway, RabbitMQ, PostgreSQL, Docker, Docker Compose, React.
 
 ## Requisitos
 - Docker y Docker Compose
-- Java 17+
-- Maven
 
-## Levantamiento local (una sola máquina)
-```bash
+## Despliegue local
 cp .env.example .env
-# Editar .env si es necesario
-docker-compose up
-```
+# Configurar JWT_SECRET en .env
+docker-compose --profile all up --build
 
-## Desarrollo distribuido (varias computadoras en misma red)
-1. Una máquina actúa como host de RabbitMQ y PostgreSQL.
-2. En cada computadora, copiar `.env.example` a `.env` y configurar:
-   - `POSTGRES_HOST` con la IP del host de BD
-   - `RABBITMQ_HOST` con la IP del host de RabbitMQ
-3. Cada integrante levanta solo sus servicios asignados.
+Para detener y eliminar contenedores:
+docker-compose down
 
-## Organización del equipo (4 integrantes)
-- Integrante 1: `gateway/`, `usuarios/`, seguridad JWT
-- Integrante 2: `vuelos/`, `inventario-asientos/`
-- Integrante 3: `reservas/`, `pagos/` (Saga e idempotencia)
-- Integrante 4: `notificaciones/`, `websocket-server/`, `frontend/`
+## Variables de entorno obligatorias
+- JWT_SECRET: clave para firmar tokens de autenticación
 
-Cada uno trabaja en su propia rama y hace Pull Request a `main`.
+## Acceso
+- Frontend: http://localhost:3000
+- API Gateway: http://localhost:8080
+- Consola RabbitMQ: http://localhost:15672
